@@ -42,7 +42,6 @@ class Hambone(MumbleBot):
 		self.setUsername("Hambone")
 		self.toggleDeafened()
 		self.setComment("I am merely a bot.")
-		print(self.user)
 
 		handlers = {
 			packets.SERVERSYNC: self.initState,
@@ -52,8 +51,8 @@ class Hambone(MumbleBot):
 		for ptype in handlers.keys():
 			self.addHandler(ptype, handlers[ptype])
 
-		self.cbot = ChatterBotFactory().create(ChatterBotType.CLEVERBOT).create_session()
-		self.quotes = [
+		self.user['data']['cbot'] = ChatterBotFactory().create(ChatterBotType.CLEVERBOT).create_session()
+		self.user['data']['quotes'] = [
 			"'give her the dick' -descartes",
 			"'I need a tap and die and some WD-40.' -Hank Hill",
 			"'The bitch went flying!' -Ben",
@@ -107,8 +106,7 @@ class Hambone(MumbleBot):
 				command = args.pop(0).decode("UTF-8").lower()
 
 				try:
-					if (not self.commands[command](self, msg_packet, user, args)):
-						raise CommandFailedError("Invalid command syntax")
+					self.commands[command](self, msg_packet, user, args)
 				except KeyError:
 					raise CommandFailedError("Invalid command: '%s', use /commands to list available commands" % command)
 				print("Ran command: '%s'." % msg_packet.message)
@@ -116,7 +114,7 @@ class Hambone(MumbleBot):
 				# msg = msg_packet.message[len(self.users[self.session].name + ", "):].encode("ascii")
 				msg = msg_packet.message[1:].encode("ascii")
 				task = reactor.callLater(3, self.sendToProper, self, msg_packet, "I'm thinking...")
-				self.sendToProper(msg_packet, self.cbot.think(msg))
+				self.sendToProper(msg_packet, self.user['data']['cbot'].think(msg))
 				task.cancel()
 		except (ArgumentsError, CommandFailedError) as e:
 			self.sendToProper(msg_packet, "Failed to run command due to: %s." % e)
@@ -126,11 +124,9 @@ class Hambone(MumbleBot):
 	def greetMe(self, msg_packet, user, args):
 		dstr = "Hello " + user['name'] + " your id is " + str(user['user_id']) + ", the current channel you are in is " + str(user['channel_id']) + "."
 		self.sendToProper(msg_packet, dstr)
-		return True
 
 	def comeToMe(self, msg_packet, user, args):
 		self.setState(user['channel_id'], None, None, None)
-		return True
 
 	def followUser(self, data):
 		state_packet = protobuf.UserState()
@@ -142,13 +138,12 @@ class Hambone(MumbleBot):
 	def followMe(self, msg_packet, user, args):
 		if 'follow' in self.user['data']:
 			self.sendToProper(msg_packet, "I am already following a user.")
-			return True
+			return
 		self.user['data']['following'] = user['session']
 		self.user['data']['follow'] = self.addHandler(9, self.followUser)
 
 		self.setState(self.users[user['session']]['channel_id'], None, None, None)
 		self.sendToProper(msg_packet, "I will now attempt to follow " + user['name'])
-		return True
 
 	def noFollow(self, msg_packet, user, args):
 		self.removeHandler(9, self.user['data']['follow'])
@@ -156,39 +151,38 @@ class Hambone(MumbleBot):
 		del self.user['data']['follow']
 
 		self.sendToProper(msg_packet, "I will now stop following.")
-		return True
 
 	def roll(self, msg_packet, user, args):
-		# todo: max this use format %
 		random.seed()
-		msg = user['name'] + " rolled a "
-		num = 0
-		try:
-			if (len(args) > 2):
-				return False
-			elif (len(args) == 2):
-				num = str(random.randrange(int(args[0]), int(args[1])))
-			elif (len(args) == 1):
-				num = str(random.randrange(int(args[0])) + 1)
-			else:
-				num = str(random.randrange(6) + 1)
-		except ValueError:
-			self.sendToProper(msg_packet, "Fuck you.")
-			return True
+		n = 1
+		m = 6
 
-		if (str(num)[0] == '8'):
-			msg = user['name'] + " rolled an " + str(num)
+		if len(args) == 1:
+			m = int(args[0])
+		elif len(args) == 2:
+			n = int(args[0])
+			m = int(args[1])
+		elif len(args) != 0:
+			raise ArgumentsError("Invalid number of arguments %i" % len(args))
+
+		if n > m:
+			n, m = m, n
+		elif n == m:
+			if len(args) == 1 and n == 1 and m == 1:
+				n = 0
+			else:
+				raise CommandFailedError("Cannot roll when minimum equals maximum")
+
+		if n == 1:
+			self.sendToProper(msg_packet, "%s rolled a d%i and got %i." % (user['name'], m, random.randrange(n, m)))
 		else:
-			msg += num
-		self.sendToProper(msg_packet, msg + ".")
-		return True
+			self.sendToProper(msg_packet, "%s rolled between %i and %i and got %i." % (user['name'], n, m, random.randrange(n, m)))
 
 	def pick(self, msg_packet, user, args):
 		if (len(args) <= 1):
-			return False
+			raise ArgumentsError("Invalid number of arguments %i" % len(args))
 		random.seed()
 		self.sendToProper(msg_packet, "Hmmm, I pick '" + random.choice(args) + "'.")
-		return True
 
 	def dance(self):
 		if not self.dancing:
@@ -210,19 +204,15 @@ class Hambone(MumbleBot):
 		self.sendToProper(msg_packet, "Initializing dance party!")
 		self.dancing = True
 		self.dance()
-		return True
 
 	def stopDance(self, msg_packet, user, args):
 		self.dancing = False
-		return True
 
 	def echo(self, msg_packet, user, args):
 		self.sendToProper(msg_packet, " ".join(args))
-		return True
 
 	def quote(self, msg_packet, user, args):
-		self.sendMessageToChannel(self.users[self.session]['channel_id'], "Quote of the now: " + random.choice(self.quotes))
-		return True
+		self.sendMessageToChannel(self.users[self.session]['channel_id'], "Quote of the now: " + random.choice(self.user['data']['quotes']))
 
 	def away(self, msg_packet, user, args):
 		if 'away' not in user['data']:
@@ -237,8 +227,6 @@ class Hambone(MumbleBot):
 		else:
 			raise Exception("Something didn't work in away.")
 
-		return True
-
 	def isaway(self, msg_packet, user, args):
 		if len(args) != 1:
 			raise ArgumentsError("Invalid number of arguments: %i" % len(args))
@@ -249,11 +237,9 @@ class Hambone(MumbleBot):
 		if 'away' not in user['data']:
 			user['data']['away'] = False
 		self.sendToProper(msg_packet, "%s away state is: %s." % (user['name'], user['data']['away']))
-		return True
 
 	def commands(self, msg_packet, user, args):
 		self.sendToProper(msg_packet, "Commands are:\n%s" % self.commands.keys())
-		return True
 
 	def dump(self, msg_packet, user, args):
 		if len(args) != 1:
@@ -266,7 +252,6 @@ class Hambone(MumbleBot):
 				print("%i: %s" % (i, channel))
 		else:
 			raise ArgumentsError("Not a valid subcommand")
-		return True
 
 	commands = {
 		"greetme": greetMe,
