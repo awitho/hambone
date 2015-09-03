@@ -24,7 +24,7 @@ class CommandFailedError(Exception):
 
 
 class MumbleProtocol(Protocol):
-	def __init__(self):
+	def __init__(self, *args, **kwargs):
 		self.handlers = {}
 		self.expecting = []
 

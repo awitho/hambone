@@ -16,8 +16,8 @@ def placeNew(orig, new):
 
 
 class MumbleBot(MumbleProtocol):
-	def __init__(self):
-		MumbleProtocol.__init__(self)
+	def __init__(self, *args, **kwargs):
+		MumbleProtocol.__init__(self, *args, **kwargs)
 
 		self.connected = False
 		self.wasConnected = False
@@ -44,7 +44,7 @@ class MumbleBot(MumbleProtocol):
 		self.connected = False
 		self.wasConnected = True
 
-		print("Protocol disconnected! Reason: %s\n " % reason)
+		print("Protocol disconnected! Reason:\n%s " % reason.getTraceback())
 		if len(self.users) <= 0:
 			return
 

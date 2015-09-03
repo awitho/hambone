@@ -12,6 +12,7 @@ from OpenSSL import SSL
 from twisted.internet import reactor
 from twisted.internet.ssl import ClientContextFactory
 from twisted.internet.protocol import Factory
+from twisted.internet.error import ConnectionAborted
 
 
 class MumbleResponseError(Exception):
@@ -38,7 +39,8 @@ class Hambone(MumbleBot):
 	command_matcher = re.compile("^/(.*)")
 
 	def __init__(self, *args, **kwargs):
-		MumbleBot.__init__(self)
+		MumbleBot.__init__(self, *args, **kwargs)
+
 		self.setUsername("Hambone")
 		self.toggleDeafened()
 		self.setComment("I am merely a bot.")
@@ -253,6 +255,9 @@ class Hambone(MumbleBot):
 		else:
 			raise ArgumentsError("Not a valid subcommand")
 
+	def stop(self, msg_packet, user, args):
+		self.transport.abortConnection()
+
 	commands = {
 		"greetme": greetMe,
 		"cometome": comeToMe,
@@ -267,7 +272,8 @@ class Hambone(MumbleBot):
 		"away": away,
 		"isaway": isaway,
 		"commands": commands,
-		"dump": dump
+		"dump": dump,
+		"stop": stop
 	}
 
 
@@ -285,7 +291,11 @@ class HamboneFactory(Factory):
 		pass
 
 	def clientConnectionLost(self, connector, reason):
-		print("Failed connection reconnecting.")
+		try:
+			reason.raiseException()
+		except ConnectionAborted:
+			reactor.stop()
+			return
 		connector.connect()
 
 
