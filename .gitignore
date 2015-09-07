@@ -2,3 +2,5 @@ keys/
 mumble/etc/
 
 *.pyc
+*.log
+

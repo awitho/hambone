@@ -3,35 +3,30 @@ import random
 import traceback
 import shlex
 
+import config
 from mumble import packets
 from mumble import protobuf
+from mumble.protocol import MumbleUDP
 from mumble.bot import MumbleBot
 
 from chatterbotapi import ChatterBotFactory, ChatterBotType
-from OpenSSL import SSL
+
 from twisted.internet import reactor
-from twisted.internet.ssl import ClientContextFactory
-from twisted.internet.protocol import Factory
-from twisted.internet.error import ConnectionAborted
 
 
 class MumbleResponseError(Exception):
-	def __init__(self, value):
-		self.value = value
-
-	def __str__(self):
-		return str(self.value)
+	pass
 
 
 class CommandFailedError(Exception):
-	def __init__(self, value):
-		self.value = value
-
-	def __str__(self):
-		return str(self.value)
+	pass
 
 
 class ArgumentsError(Exception):
+	pass
+
+
+class PermissionsError(Exception):
 	pass
 
 
@@ -39,19 +34,24 @@ class Hambone(MumbleBot):
 	command_matcher = re.compile("^/(.*)")
 
 	def __init__(self, *args, **kwargs):
-		MumbleBot.__init__(self, *args, **kwargs)
-
-		self.setUsername("Hambone")
-		self.toggleDeafened()
-		self.setComment("I am merely a bot.")
+		MumbleBot.__init__(self, "Hambone", *args, **kwargs)
 
 		handlers = {
 			packets.SERVERSYNC: self.initState,
-			packets.TEXTMESSAGE: self.parseMessage
+			packets.TEXTMESSAGE: self.parseMessage,
 		}
 
 		for ptype in handlers.keys():
 			self.addHandler(ptype, handlers[ptype])
+
+	def userJoined(self, user):
+		self.logger.info("%s joined." % user['name'])
+
+	def userLeft(self, user):
+		self.logger.info("%s left." % user['name'])
+
+	def initState(self, data):
+		self.logger.info("Connected.")
 
 		self.user['data']['cbot'] = ChatterBotFactory().create(ChatterBotType.CLEVERBOT).create_session()
 		self.user['data']['quotes'] = [
@@ -62,24 +62,13 @@ class Hambone(MumbleBot):
 			"'Do I look I know what a jaypeg is?' -Hank Hill"
 		]
 
-	def initState(self, data):
-		self.syncState()
+		if self.user['comment'] == "":
+			self.setComment("I am merely a bot.")
 
-	def sendMessageToChannel(self, channel, msg):
-		# print("Sending message to channel %i:\n\t%s." % (channel, msg))
-		msg_packet = protobuf.TextMessage()
-		msg_packet.actor = self.session
-		msg_packet.channel_id.append(channel)
-		msg_packet.message = str(msg)
-		self.writeProtobuf(11, msg_packet)
+		self.toggleDeafened()
 
-	def sendMessageToUser(self, user, msg):
-		# print("Sending message to user %i:\n\t%s." % (user, msg))
-		msg_packet = protobuf.TextMessage()
-		msg_packet.actor = self.session
-		msg_packet.session.append(user)
-		msg_packet.message = str(msg)
-		self.writeProtobuf(11, msg_packet)
+	def firstHeartbeat(self, data):
+		reactor.resolve("shio.moe").addCallback(lambda ip: reactor.listenUDP(57891, MumbleUDP(ip, self.key, self.client_nonce, self.server_nonce)))
 
 	def sendToProper(self, msg_packet, msg):
 		if (msg_packet.channel_id):
@@ -96,32 +85,30 @@ class Hambone(MumbleBot):
 		try:
 			if result:
 				user = self.users[msg_packet.actor]
-				# if (user.name != "Czaalts"):
-				# 	packet = mumble_proto.UserRemove()
-				# 	packet.session = user.session
-				# 	packet.actor = self.session
-				# 	packet.reason = "Fuck off."
-
-				# 	self.writeProtobuf(8, packet)
-				# 	return
 				args = shlex.split(result.group(1).replace("&quot;", "\""))
 				command = args.pop(0).decode("UTF-8").lower()
 
-				try:
-					self.commands[command](self, msg_packet, user, args)
-				except KeyError:
+				if command not in self.commands:
 					raise CommandFailedError("Invalid command: '%s', use /commands to list available commands" % command)
-				print("Ran command: '%s'." % msg_packet.message)
+
+				try:
+					if re.match(config.admins[user['name']], command) is None:
+						raise PermissionsError("Insufficient permissions")
+				except KeyError:
+					if '@' not in config.admins or re.match(config.admins['@'], command) is None:
+						raise PermissionsError("Insufficient permissions")
+
+				self.commands[command](self, msg_packet, user, args)
+				self.logger.info("%s ran command: '%s'." % (user['name'], msg_packet.message))
 			elif re.match("^#", msg_packet.message):
-				# msg = msg_packet.message[len(self.users[self.session].name + ", "):].encode("ascii")
 				msg = msg_packet.message[1:].encode("ascii")
 				task = reactor.callLater(3, self.sendToProper, self, msg_packet, "I'm thinking...")
 				self.sendToProper(msg_packet, self.user['data']['cbot'].think(msg))
 				task.cancel()
-		except (ArgumentsError, CommandFailedError) as e:
+		except (ArgumentsError, CommandFailedError, PermissionsError) as e:
 			self.sendToProper(msg_packet, "Failed to run command due to: %s." % e)
 		except:
-			self.sendToProper(msg_packet, "Failed to run command '%s' with:<br/><blockquote>%s</blockquote>" % (msg_packet.message, traceback.format_exc().replace("\n", "<br/>")))
+			self.logger.error("Failed to run command '%s' with:\n<blockquote>%s</blockquote>" % (msg_packet.message, traceback.format_exc()))
 
 	def greetMe(self, msg_packet, user, args):
 		dstr = "Hello " + user['name'] + " your id is " + str(user['user_id']) + ", the current channel you are in is " + str(user['channel_id']) + "."
@@ -187,7 +174,7 @@ class Hambone(MumbleBot):
 		self.sendToProper(msg_packet, "Hmmm, I pick '" + random.choice(args) + "'.")
 
 	def dance(self):
-		if not self.dancing:
+		if not self.user['data']['dancing']:
 			return
 		for ele in self.users:
 			if self.users[ele]['session'] == self.session:
@@ -203,18 +190,33 @@ class Hambone(MumbleBot):
 		reactor.callLater(1, self.Dance)
 
 	def danceParty(self, msg_packet, user, args):
-		self.sendToProper(msg_packet, "Initializing dance party!")
-		self.dancing = True
-		self.dance()
-
-	def stopDance(self, msg_packet, user, args):
-		self.dancing = False
+		if len(args) == 1:
+			if args[0] == "stop":
+				if 'dancing' not in self.user['data'] or not self.user['data']['dancing']:
+					self.sendToProper(msg_packet, "No dancy party has been started!")
+					return
+				self.user['data']['dancing'] = False
+			elif args[0] == "start":
+				self.sendToProper(msg_packet, "Initializing dance party!")
+				self.user['data']['dancing'] = True
+				self.dance()
+		else:
+			raise ArgumentsError("Invalid number of arguments: %i" % len(args))
 
 	def echo(self, msg_packet, user, args):
 		self.sendToProper(msg_packet, " ".join(args))
 
 	def quote(self, msg_packet, user, args):
 		self.sendMessageToChannel(self.users[self.session]['channel_id'], "Quote of the now: " + random.choice(self.user['data']['quotes']))
+
+	def announceAway(self):
+		aways = []
+		for (session, user) in list(self.users.items()):
+			if 'away' in user['data'] and user['data']['away']:
+				aways.append(user['name'])
+		if len(aways) > 0:
+			self.sendMessageToChannel(self.user['channel_id'], "%s are currently away." % (aways))
+		reactor.callLater(30, self.announceAway)
 
 	def away(self, msg_packet, user, args):
 		if 'away' not in user['data']:
@@ -248,15 +250,21 @@ class Hambone(MumbleBot):
 			raise ArgumentsError("Invalid number of arguments: %i" % len(args))
 		if args[0].find("users") == 0:
 			for (session, user) in list(self.users.items()):
-				print("%i: %s(%i)" % (session, user, len(user['comment'])))
+				self.logger.debug("%i: %s" % (session, user))
 		elif args[0].find("channels") == 0:
 			for (i, channel) in list(self.channels.items()):
-				print("%i: %s" % (i, channel))
+				self.logger.debug("%i: %s" % (i, channel))
 		else:
 			raise ArgumentsError("Not a valid subcommand")
 
 	def stop(self, msg_packet, user, args):
 		self.transport.abortConnection()
+
+	def restart(self, msg_packet, user, args):
+		self.transport.loseConnection()
+
+	def whosGay(self, msg_packet, user, args):
+		self.sendToProper(msg_packet, "Rebu is the gayest faggot there is!")
 
 	commands = {
 		"greetme": greetMe,
@@ -265,52 +273,14 @@ class Hambone(MumbleBot):
 		"nofollow": noFollow,
 		"roll": roll,
 		"pick": pick,
-		# "danceparty": danceParty,
-		# "plsnomore": stopDance,
+		"dance": danceParty,
 		"echo": echo,
 		"quote": quote,
 		"away": away,
 		"isaway": isaway,
 		"commands": commands,
 		"dump": dump,
-		"stop": stop
+		"stop": stop,
+		"restart": restart,
+		"whosgay": whosGay
 	}
-
-
-class HamboneFactory(Factory):
-	def __init__(self):
-		pass
-
-	def buildProtocol(self, addr):
-		return Hambone()
-
-	def startedConnecting(self, connector):
-		pass
-
-	def clientConnectionFailed(self, connector, reason):
-		pass
-
-	def clientConnectionLost(self, connector, reason):
-		try:
-			reason.raiseException()
-		except ConnectionAborted:
-			reactor.stop()
-			return
-		connector.connect()
-
-
-class CtxFactory(ClientContextFactory):
-	def __init__(self):
-		pass
-
-	def getContext(self):
-		self.method = SSL.SSLv23_METHOD
-
-		ctx = ClientContextFactory.getContext(self)
-		ctx.use_certificate_file('keys\client.crt')
-		ctx.use_privatekey_file('keys\client.key')
-
-		return ctx
-
-reactor.connectSSL("shio.moe", 64738, HamboneFactory(), CtxFactory())
-reactor.run()
