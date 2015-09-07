@@ -97,7 +97,7 @@ class MumbleUDP(ConnectedDatagramProtocol):
 		if self.logger.handlers == []:
 			self.logger.setLevel(logging.DEBUG)
 
-			file = logging.FileHandler("hambone-udp.log")
+			file = logging.handlers.RotatingFileHandler("hambone-udp.log", maxBytes=512 * 1024, backupCount=3)
 			file.setFormatter(self.format)
 			self.logger.addHandler(file)
 

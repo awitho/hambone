@@ -1,6 +1,7 @@
 import sys
 import struct
 import logging
+import logging.handlers
 
 from . import packets
 from .protocol import MumbleProtocol
@@ -58,7 +59,7 @@ class MumbleBot(MumbleProtocol):
 		if self.logger.handlers == []:
 			self.logger.setLevel(logging.DEBUG)
 
-			file = logging.FileHandler("hambone.log")
+			file = logging.handlers.RotatingFileHandler("hambone.log", maxBytes=512 * 1024, backupCount=3)
 			file.setLevel(logging.WARNING)
 			file.setFormatter(self.format)
 			self.logger.addHandler(file)
