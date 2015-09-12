@@ -4,8 +4,7 @@ import traceback
 import shlex
 
 import config
-from mumble import packets
-from mumble import protobuf
+from mumble import packets, protobuf, html
 from mumble.protocol import MumbleUDP
 from mumble.bot import MumbleBot
 
@@ -80,12 +79,12 @@ class Hambone(MumbleBot):
 		msg_packet = protobuf.TextMessage()
 		msg_packet.ParseFromString(data)
 		user = msg_packet.actor
-		result = self.command_matcher.match(msg_packet.message)
+		result = self.command_matcher.match(html.unescape(msg_packet.message))
 
 		try:
 			if result:
 				user = self.users[msg_packet.actor]
-				args = shlex.split(result.group(1).replace("&quot;", "\""))
+				args = shlex.split(result.group(1))
 				command = args.pop(0).decode("UTF-8").lower()
 
 				if command not in self.commands:

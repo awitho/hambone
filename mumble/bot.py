@@ -3,6 +3,7 @@ import struct
 import logging
 import logging.handlers
 
+from . import html
 from . import packets
 from .protocol import MumbleProtocol
 from .objects import MumbleUser, MumbleChannel
@@ -19,6 +20,7 @@ class MumbleHandler(logging.Handler):
 	def emit(self, record):
 		try:
 			msg = self.format(record).replace("\n", "<br/>")
+			msg = html.escape(msg)
 			if 'last_message' in self.protocol.user['data']:
 				self.protocol.sendToProper(self.protocol.user['data']['last_message'], msg)
 			else:
