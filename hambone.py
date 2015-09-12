@@ -122,22 +122,36 @@ class Hambone(MumbleBot):
 		if state_packet.session == self.user['data']['following']:
 			self.setState(self.users[state_packet.session]['channel_id'], None, None, None)
 
-	def followMe(self, msg_packet, user, args):
-		if 'follow' in self.user['data']:
-			self.sendToProper(msg_packet, "I am already following a user.")
-			return
-		self.user['data']['following'] = user['session']
-		self.user['data']['follow'] = self.addHandler(9, self.followUser)
+	def follow(self, msg_packet, user, args):
+		if len(args) != 1:
+			raise CommandSyntaxError("/follow <user|@stop|@me>")
 
-		self.setState(self.users[user['session']]['channel_id'], None, None, None)
-		self.sendToProper(msg_packet, "I will now attempt to follow %s." % user['name'])
+		if args[0].find("@stop") == 0:
+			if 'follow' not in self.user['data']:
+				self.sendToProper(msg_packet, "I am not following anyone.")
+				return
 
-	def noFollow(self, msg_packet, user, args):
-		self.removeHandler(9, self.user['data']['follow'])
-		del self.user['data']['following']
-		del self.user['data']['follow']
+			self.removeHandler(9, self.user['data']['follow'])
+			del self.user['data']['following']
+			del self.user['data']['follow']
 
-		self.sendToProper(msg_packet, "I will now stop following.")
+			self.sendToProper(msg_packet, "I will now stop following.")
+		else:
+			if args[0].find("@me") == -1:
+				user = self.findUser(args[0])
+
+			if user == -1:
+				raise CommandFailedError("Could not find user '%s'" % args[0])
+
+			if 'follow' in self.user['data']:
+				self.sendToProper(msg_packet, "I am already following a user.")
+				return
+
+			self.user['data']['following'] = user['session']
+			self.user['data']['follow'] = self.addHandler(9, self.followUser)
+
+			self.setState(self.users[user['session']]['channel_id'], None, None, None)
+			self.sendToProper(msg_packet, "I will now attempt to follow %s." % user['name'])
 
 	def roll(self, msg_packet, user, args):
 		random.seed()
@@ -264,8 +278,7 @@ class Hambone(MumbleBot):
 	commands = {
 		"greetme": greetMe,
 		"cometome": comeToMe,
-		"followme": followMe,
-		"nofollow": noFollow,
+		"follow": follow,
 		"roll": roll,
 		"pick": pick,
 		"dance": danceParty,
