@@ -50,8 +50,6 @@ class Hambone(MumbleBot):
 		self.logger.info("%s left." % user['name'])
 
 	def initState(self, data):
-		self.logger.info("Connected.")
-
 		self.user['data']['cbot'] = ChatterBotFactory().create(ChatterBotType.CLEVERBOT).create_session()
 		self.user['data']['quotes'] = [
 			"'give her the dick' -descartes",

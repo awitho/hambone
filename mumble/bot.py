@@ -188,6 +188,8 @@ class MumbleBot(MumbleProtocol):
 		self.session = server_packet.session
 		self.user = self.users[self.session]
 
+		self.logger.info("Connected.")
+
 		self.addHandler(packets.TEXTMESSAGE, self.logLast)
 
 		self.keepAlive()  # Begin heartbeat
