@@ -22,7 +22,7 @@ class CommandFailedError(Exception):
 	pass
 
 
-class ArgumentsError(Exception):
+class CommandSyntaxError(Exception):
 	pass
 
 
@@ -105,7 +105,7 @@ class Hambone(MumbleBot):
 				task = reactor.callLater(3, self.sendToProper, self, msg_packet, "I'm thinking...")
 				self.sendToProper(msg_packet, self.user['data']['cbot'].think(msg))
 				task.cancel()
-		except (ArgumentsError, CommandFailedError, PermissionsError) as e:
+		except (CommandSyntaxError, CommandFailedError, PermissionsError) as e:
 			self.sendToProper(msg_packet, "Failed to run command due to: %s." % e)
 		except:
 			self.logger.error("Failed to run command '%s' with:\n<blockquote>%s</blockquote>" % (msg_packet.message, traceback.format_exc()))
@@ -152,7 +152,7 @@ class Hambone(MumbleBot):
 			n = int(args[0])
 			m = int(args[1])
 		elif len(args) != 0:
-			raise ArgumentsError("Invalid number of arguments %i" % len(args))
+			raise CommandSyntaxError("/roll [minimum] [maximum]")
 
 		if n > m:
 			n, m = m, n
@@ -169,7 +169,7 @@ class Hambone(MumbleBot):
 
 	def pick(self, msg_packet, user, args):
 		if (len(args) <= 1):
-			raise ArgumentsError("Invalid number of arguments %i" % len(args))
+			raise CommandSyntaxError("/pick <object> ...")
 		random.seed()
 		self.sendToProper(msg_packet, "Hmmm, I pick '" + random.choice(args) + "'.")
 
@@ -201,7 +201,7 @@ class Hambone(MumbleBot):
 				self.user['data']['dancing'] = True
 				self.dance()
 		else:
-			raise ArgumentsError("Invalid number of arguments: %i" % len(args))
+			raise CommandSyntaxError("/dance <start|stop>")
 
 	def echo(self, msg_packet, user, args):
 		self.sendToProper(msg_packet, " ".join(args))
@@ -233,7 +233,7 @@ class Hambone(MumbleBot):
 
 	def isaway(self, msg_packet, user, args):
 		if len(args) != 1:
-			raise ArgumentsError("Invalid number of arguments: %i" % len(args))
+			raise CommandSyntaxError("/isaway <user>")
 		session = self.findUser(args[0])
 		if session == -1:
 			raise CommandFailedError("Unable to find user by the name of '%s'" % args[0])
@@ -247,7 +247,7 @@ class Hambone(MumbleBot):
 
 	def dump(self, msg_packet, user, args):
 		if len(args) != 1:
-			raise ArgumentsError("Invalid number of arguments: %i" % len(args))
+			raise CommandSyntaxError("/dump <users|channels>")
 		if args[0].find("users") == 0:
 			for (session, user) in list(self.users.items()):
 				self.logger.debug("%i: %s" % (session, user))
@@ -255,7 +255,7 @@ class Hambone(MumbleBot):
 			for (i, channel) in list(self.channels.items()):
 				self.logger.debug("%i: %s" % (i, channel))
 		else:
-			raise ArgumentsError("Not a valid subcommand")
+			raise CommandSyntaxError("Not a valid subcommand: %s" % args[0])
 
 	def stop(self, msg_packet, user, args):
 		self.transport.abortConnection()
