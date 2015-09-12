@@ -105,8 +105,10 @@ class Hambone(MumbleBot):
 				task = reactor.callLater(3, self.sendToProper, self, msg_packet, "I'm thinking...")
 				self.sendToProper(msg_packet, self.user['data']['cbot'].think(msg))
 				task.cancel()
-		except (CommandSyntaxError, CommandFailedError, PermissionsError) as e:
-			self.sendToProper(msg_packet, "Failed to run command due to: %s." % e)
+		except (CommandFailedError, PermissionsError) as e:
+			self.logger.error("Failed to run command due to: %s." % e)
+		except CommandSyntaxError as e:
+			self.logger.error("Invalid command syntax try: %s" % e)
 		except:
 			self.logger.error("Failed to run command '%s' with:\n<blockquote>%s</blockquote>" % (msg_packet.message, traceback.format_exc()))
 
