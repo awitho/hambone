@@ -19,8 +19,7 @@ class MumbleHandler(logging.Handler):
 
 	def emit(self, record):
 		try:
-			msg = self.format(record).replace("\n", "<br/>")
-			msg = html.escape(msg)
+			msg = html.escape(self.format(record)).replace("\n", "<br/>")
 			if 'last_message' in self.protocol.user['data']:
 				self.protocol.sendToProper(self.protocol.user['data']['last_message'], msg)
 			else:

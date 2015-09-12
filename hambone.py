@@ -107,7 +107,7 @@ class Hambone(MumbleBot):
 		except CommandSyntaxError as e:
 			self.logger.error("Invalid command syntax try: %s" % e)
 		except:
-			self.logger.error("Failed to run command '%s' with:\n<blockquote>%s</blockquote>" % (msg_packet.message, traceback.format_exc()))
+			self.logger.error("Failed to run command '%s' with:\n%s" % (msg_packet.message, traceback.format_exc()))
 
 	def greetMe(self, msg_packet, user, args):
 		self.sendToProper(msg_packet, "Hello %s your id is %i, the current channel you are in is %i." % (user['name'], user['user_id'], user['channel_id']))
