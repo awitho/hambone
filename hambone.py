@@ -103,7 +103,7 @@ class Hambone(MumbleBot):
 				self.sendToProper(msg_packet, self.user['data']['cbot'].think(msg))
 				task.cancel()
 		except (CommandFailedError, PermissionsError) as e:
-			self.logger.error("Failed to run command due to: %s." % e)
+			self.logger.error("Failed to run command '%s' due to: %s." % (command, e))
 		except CommandSyntaxError as e:
 			self.logger.error("Invalid command syntax try: %s" % e)
 		except:
