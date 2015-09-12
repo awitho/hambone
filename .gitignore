@@ -1,6 +1,6 @@
 keys/
-mumble/etc/
+etc/
 
 *.pyc
 *.log
-
+*.sublime-*
