@@ -113,8 +113,7 @@ class Hambone(MumbleBot):
 			self.logger.error("Failed to run command '%s' with:\n<blockquote>%s</blockquote>" % (msg_packet.message, traceback.format_exc()))
 
 	def greetMe(self, msg_packet, user, args):
-		dstr = "Hello " + user['name'] + " your id is " + str(user['user_id']) + ", the current channel you are in is " + str(user['channel_id']) + "."
-		self.sendToProper(msg_packet, dstr)
+		self.sendToProper(msg_packet, "Hello %s your id is %i, the current channel you are in is %i." % (user['name'], user['user_id'], user['channel_id']))
 
 	def comeToMe(self, msg_packet, user, args):
 		self.setState(user['channel_id'], None, None, None)
@@ -134,7 +133,7 @@ class Hambone(MumbleBot):
 		self.user['data']['follow'] = self.addHandler(9, self.followUser)
 
 		self.setState(self.users[user['session']]['channel_id'], None, None, None)
-		self.sendToProper(msg_packet, "I will now attempt to follow " + user['name'])
+		self.sendToProper(msg_packet, "I will now attempt to follow %s." % user['name'])
 
 	def noFollow(self, msg_packet, user, args):
 		self.removeHandler(9, self.user['data']['follow'])
@@ -173,7 +172,7 @@ class Hambone(MumbleBot):
 		if (len(args) <= 1):
 			raise CommandSyntaxError("/pick <object> ...")
 		random.seed()
-		self.sendToProper(msg_packet, "Hmmm, I pick '" + random.choice(args) + "'.")
+		self.sendToProper(msg_packet, "Hmmm, I pick '%s'." % random.choice(args))
 
 	def dance(self):
 		if not self.user['data']['dancing']:
@@ -209,7 +208,7 @@ class Hambone(MumbleBot):
 		self.sendToProper(msg_packet, " ".join(args))
 
 	def quote(self, msg_packet, user, args):
-		self.sendMessageToChannel(self.users[self.session]['channel_id'], "Quote of the now: " + random.choice(self.user['data']['quotes']))
+		self.sendMessageToChannel(self.users[self.session]['channel_id'], "Quote of the now: '%s'." % random.choice(self.user['data']['quotes']))
 
 	def announceAway(self):
 		aways = []
