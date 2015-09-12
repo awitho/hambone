@@ -230,7 +230,7 @@ class Hambone(MumbleBot):
 		elif user['data']['away'] is False:
 			self.sendMessageToChannel(user['channel_id'], "%s has come back from being away." % user['name'])
 		else:
-			raise Exception("Something didn't work in away.")
+			raise CommandFailedError("Logic has failed us all.")
 
 	def isaway(self, msg_packet, user, args):
 		if len(args) != 1:
