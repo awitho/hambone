@@ -138,7 +138,7 @@ class Hambone(MumbleBot):
 			self.sendToProper(msg_packet, "I will now stop following.")
 		else:
 			if args[0].find("@me") == -1:
-				user = self.findUser(args[0])
+				user = self.users[self.findUser(args[0])]
 
 			if user == -1:
 				raise CommandFailedError("Could not find user '%s'" % args[0])
