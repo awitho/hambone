@@ -263,9 +263,6 @@ class Hambone(MumbleBot):
 	def restart(self, msg_packet, user, args):
 		self.transport.loseConnection()
 
-	def whosGay(self, msg_packet, user, args):
-		self.sendToProper(msg_packet, "Rebu is the gayest faggot there is!")
-
 	commands = {
 		"greetme": greetMe,
 		"cometome": comeToMe,
@@ -282,5 +279,4 @@ class Hambone(MumbleBot):
 		"dump": dump,
 		"stop": stop,
 		"restart": restart,
-		"whosgay": whosGay
 	}
