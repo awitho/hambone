@@ -7,11 +7,13 @@ build_exe_options = {"packages": ["zope", "zope.interface"], "excludes": ["tkint
 # GUI applications require a different base on Windows (the default is for a
 # console application).
 base = None
-#if sys.platform == "win32":
+# if sys.platform == "win32":
 #    base = "Win32GUI"
 
-setup(  name = "mumble_bot",
-        version = "0.1",
-        description = "fat",
-        #options = {"build_exe": build_exe_options},
-        executables = [Executable("mumble_bot.py", base=base)])
+setup(
+	name="mumble_bot",
+	version="0.1",
+	description="fat",
+	# options = {"build_exe": build_exe_options},
+	executables=[Executable("mumble_bot.py", base=base)]
+)
