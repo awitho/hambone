@@ -103,7 +103,7 @@ class Hambone(MumbleBot):
 				command = args.pop(0).decode("UTF-8").lower()
 
 				if command not in self.commands:
-					raise CommandFailedError("Invalid command: '%s', use /commands to list available commands" % command)
+					raise CommandFailedError("Invalid command: '%s', use /help to list available commands" % command)
 
 				try:
 					if re.match(config.admins[user['name']], command) is None:
