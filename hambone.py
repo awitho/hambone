@@ -11,6 +11,7 @@ from mumble.bot import MumbleBot
 from chatterbotapi import ChatterBotFactory, ChatterBotType
 
 from twisted.internet import reactor
+from functools import wraps
 
 
 class MumbleResponseError(Exception):
@@ -29,7 +30,18 @@ class PermissionsError(Exception):
 	pass
 
 
+class register():
+	_command = True
+
+	def __init__(self, f):
+		self.f = f
+
+	def __call__(self, *args, **kwargs):
+		return self.f(*args, **kwargs)
+
+
 class Hambone(MumbleBot):
+	commands = {}
 	command_matcher = re.compile("^/(.*)")
 
 	def __init__(self, *args, **kwargs):
@@ -42,6 +54,11 @@ class Hambone(MumbleBot):
 
 		for ptype in handlers.keys():
 			self.addHandler(ptype, handlers[ptype])
+
+		for f in dir(self):
+			attr = getattr(self, f)
+			if getattr(self, f) != None and hasattr(attr, "_command"):
+				self.commands[f] = getattr(self, f)
 
 	def userJoined(self, user):
 		self.logger.info("%s joined." % user['name'])
@@ -109,10 +126,12 @@ class Hambone(MumbleBot):
 		except:
 			self.logger.error("Failed to run command '%s' with:\n%s" % (msg_packet.message, traceback.format_exc()))
 
-	def greetMe(self, msg_packet, user, args):
+	@register
+	def greet(self, msg_packet, user, args):
 		self.sendToProper(msg_packet, "Hello %s your id is %i, the current channel you are in is %i." % (user['name'], user['user_id'], user['channel_id']))
 
-	def comeToMe(self, msg_packet, user, args):
+	@register
+	def come(self, msg_packet, user, args):
 		self.setState(user['channel_id'], None, None, None)
 
 	def followUser(self, data):
@@ -122,6 +141,7 @@ class Hambone(MumbleBot):
 		if state_packet.session == self.user['data']['following']:
 			self.setState(self.users[state_packet.session]['channel_id'], None, None, None)
 
+	@register
 	def follow(self, msg_packet, user, args):
 		if len(args) != 1:
 			raise CommandSyntaxError("/follow <user|@stop|@me>")
@@ -153,6 +173,7 @@ class Hambone(MumbleBot):
 			self.setState(self.users[user['session']]['channel_id'], None, None, None)
 			self.sendToProper(msg_packet, "I will now attempt to follow %s." % user['name'])
 
+	@register
 	def roll(self, msg_packet, user, args):
 		random.seed()
 		n = 1
@@ -179,13 +200,14 @@ class Hambone(MumbleBot):
 		else:
 			self.sendToProper(msg_packet, "%s rolled between %i and %i and got %i." % (user['name'], n, m, random.randrange(n, m)))
 
+	@register
 	def pick(self, msg_packet, user, args):
 		if (len(args) <= 1):
 			raise CommandSyntaxError("/pick <object> ...")
 		random.seed()
 		self.sendToProper(msg_packet, "Hmmm, I pick '%s'." % random.choice(args))
 
-	def dance(self):
+	def do_dance(self):
 		if not self.user['data']['dancing']:
 			return
 		for ele in self.users:
@@ -199,9 +221,10 @@ class Hambone(MumbleBot):
 			packet.session = self.users[ele]['session']
 			packet.actor = self.session
 			self.writeProtobuf(9, packet)
-		reactor.callLater(1, self.Dance)
+		reactor.callLater(1, self.do_dance)
 
-	def danceParty(self, msg_packet, user, args):
+	@register
+	def dance(self, msg_packet, user, args):
 		if len(args) == 1:
 			if args[0] == "stop":
 				if 'dancing' not in self.user['data'] or not self.user['data']['dancing']:
@@ -211,13 +234,15 @@ class Hambone(MumbleBot):
 			elif args[0] == "start":
 				self.sendToProper(msg_packet, "Initializing dance party!")
 				self.user['data']['dancing'] = True
-				self.dance()
+				self.do_dance()
 		else:
 			raise CommandSyntaxError("/dance <start|stop>")
 
+	@register
 	def echo(self, msg_packet, user, args):
 		self.sendToProper(msg_packet, " ".join(args))
 
+	@register
 	def quote(self, msg_packet, user, args):
 		self.sendMessageToChannel(self.users[self.session]['channel_id'], "Quote of the now: '%s'." % random.choice(self.user['data']['quotes']))
 
@@ -230,6 +255,7 @@ class Hambone(MumbleBot):
 			self.sendMessageToChannel(self.user['channel_id'], "%s are currently away." % (aways))
 		reactor.callLater(30, self.announceAway)
 
+	@register
 	def away(self, msg_packet, user, args):
 		if 'away' not in user['data']:
 			user['data']['away'] = False
@@ -243,6 +269,7 @@ class Hambone(MumbleBot):
 		else:
 			raise CommandFailedError("Logic has failed us all.")
 
+	@register
 	def isaway(self, msg_packet, user, args):
 		if len(args) != 1:
 			raise CommandSyntaxError("/isaway <user>")
@@ -254,9 +281,11 @@ class Hambone(MumbleBot):
 			user['data']['away'] = False
 		self.sendToProper(msg_packet, "%s away state is: %s." % (user['name'], user['data']['away']))
 
-	def commands(self, msg_packet, user, args):
+	@register
+	def help(self, msg_packet, user, args):
 		self.sendToProper(msg_packet, "Commands are:\n%s" % self.commands.keys())
 
+	@register
 	def dump(self, msg_packet, user, args):
 		if len(args) != 1:
 			raise CommandSyntaxError("/dump <users|channels>")
@@ -269,25 +298,10 @@ class Hambone(MumbleBot):
 		else:
 			raise CommandSyntaxError("Not a valid subcommand: %s" % args[0])
 
+	@register
 	def stop(self, msg_packet, user, args):
 		self.transport.abortConnection()
 
+	@register
 	def restart(self, msg_packet, user, args):
 		self.transport.loseConnection()
-
-	commands = {
-		"greetme": greetMe,
-		"cometome": comeToMe,
-		"follow": follow,
-		"roll": roll,
-		"pick": pick,
-		"dance": danceParty,
-		"echo": echo,
-		"quote": quote,
-		"away": away,
-		"isaway": isaway,
-		"commands": commands,
-		"dump": dump,
-		"stop": stop,
-		"restart": restart,
-	}
