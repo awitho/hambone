@@ -25,7 +25,7 @@ class MumbleHandler(logging.Handler):
 			else:
 				self.protocol.sendMessageToChannel(self.protocol.user['channel_id'], msg)
 		except:
-			self.handlerError(record)
+			self.handleError(record)
 
 
 def bytearrayToBinaryString(array):
