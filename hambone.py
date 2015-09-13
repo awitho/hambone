@@ -30,6 +30,26 @@ class PermissionsError(Exception):
 	pass
 
 
+def shlex_split(x):
+	"""Helper function to split lines into segments."""
+	# shlex.split raise exception if syntax error in sh syntax
+	# for example if no closing " is found. This function keeps dropping
+	# the last character of the line until shlex.split does not raise
+	# exception. Adds end of the line to the result of shlex.split
+	# example: %run "c:/python  -> ['%run','"c:/python']
+	endofline = []
+	while x != "":
+		try:
+			comps = shlex.split(x)
+			if len(endofline) >= 1:
+				comps.append("".join(endofline))
+			return comps
+		except ValueError:
+			endofline = [x[-1:]] + endofline
+			x = x[:-1]
+	return ["".join(endofline)]
+
+
 class register():
 	_command = True
 
@@ -99,7 +119,7 @@ class Hambone(MumbleBot):
 		try:
 			if result:
 				user = self.users[msg_packet.actor]
-				args = shlex.split(result.group(1))
+				args = shlex_split(result.group(1))
 				command = args.pop(0).decode("UTF-8").lower()
 
 				if command not in self.commands:
@@ -128,7 +148,8 @@ class Hambone(MumbleBot):
 
 	@register
 	def greet(self, msg_packet, user, args):
-		self.sendToProper(msg_packet, "Hello %s your id is %i, the current channel you are in is %i." % (user['name'], user['user_id'], user['channel_id']))
+		channel = self.channels[user['channel_id']]
+		self.sendToProper(msg_packet, "Hello %s [%i], the current channel you are in is %s [%i]." % (user['name'], user['user_id'], channel['name'], channel['channel_id']))
 
 	@register
 	def come(self, msg_packet, user, args):
@@ -238,9 +259,12 @@ class Hambone(MumbleBot):
 		else:
 			raise CommandSyntaxError("/dance <start|stop>")
 
+	echo_matcher = re.compile("^/\w* (.*)")
+
 	@register
 	def echo(self, msg_packet, user, args):
-		self.sendToProper(msg_packet, " ".join(args))
+		result = self.echo_matcher.match(html.unescape(msg_packet.message))
+		self.sendToProper(msg_packet, html.escape(result.group(1)))
 
 	@register
 	def quote(self, msg_packet, user, args):
@@ -299,7 +323,7 @@ class Hambone(MumbleBot):
 			raise CommandSyntaxError("Not a valid subcommand: %s" % args[0])
 
 	@register
-	def stop(self, msg_packet, user, args):
+	def shutdown(self, msg_packet, user, args):
 		self.transport.abortConnection()
 
 	@register
