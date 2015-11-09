@@ -39,7 +39,7 @@ class MumbleBot(MumbleProtocol):
 	format = logging.Formatter("%(asctime)-15s %(name)-3s | %(levelname)-6s: %(message)s")
 	s_format = logging.Formatter("%(levelname)s: %(message)s")
 
-	def __init__(self, name, *args, **kwargs):
+	def __init__(self, name=None, *args, **kwargs):
 		MumbleProtocol.__init__(self, *args, **kwargs)
 
 		self.connected = False

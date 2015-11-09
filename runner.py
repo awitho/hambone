@@ -15,7 +15,7 @@ class HamboneFactory(Factory):
 		pass
 
 	def buildProtocol(self, addr):
-		return hambone.Hambone()
+		return hambone.Hambone(name=config.name)
 
 	def startedConnecting(self, connector):
 		pass

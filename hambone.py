@@ -66,8 +66,8 @@ class Hambone(MumbleBot):
 	commands = {}
 	command_matcher = re.compile("^/(.*)")
 
-	def __init__(self, *args, **kwargs):
-		MumbleBot.__init__(self, "Hambone", *args, **kwargs)
+	def __init__(self, name="Hambone", *args, **kwargs):
+		MumbleBot.__init__(self, name=name, *args, **kwargs)
 
 		handlers = {
 			packets.SERVERSYNC: self.initState,
