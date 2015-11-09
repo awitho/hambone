@@ -1,17 +1,19 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 import re
 import random
 import traceback
 import shlex
 
+from chatterbotapi import ChatterBotFactory, ChatterBotType
+from twisted.internet import reactor
+from functools import wraps
+
 import config
 from mumble import packets, protobuf, html
 from mumble.protocol import MumbleUDP
 from mumble.bot import MumbleBot
-
-from chatterbotapi import ChatterBotFactory, ChatterBotType
-
-from twisted.internet import reactor
-from functools import wraps
 
 
 class MumbleResponseError(Exception):
@@ -89,11 +91,12 @@ class Hambone(MumbleBot):
 	def initState(self, data):
 		self.user['data']['cbot'] = ChatterBotFactory().create(ChatterBotType.CLEVERBOT).create_session()
 		self.user['data']['quotes'] = [
-			"'give her the dick' -descartes",
+			"'give her the dick' -René Descartes",
 			"'I need a tap and die and some WD-40.' -Hank Hill",
-			"'The bitch went flying!' -Ben",
-			"'It's all nice on ice.' -Ur mum",
-			"'Do I look I know what a jaypeg is?' -Hank Hill"
+			"'The bitch went flying!' -Ben Szmalc",
+			"'It's all nice on ice.' -Isaac Brooke",
+			"'Do I look like I know what a jaypeg is?' -Hank Hill",
+			"'We need more quotes, man.' -Alex Bufanda"
 		]
 
 		if self.user['comment'] == "":
