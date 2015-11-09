@@ -77,6 +77,9 @@ class Hambone(MumbleBot):
 		for ptype in handlers.keys():
 			self.addHandler(ptype, handlers[ptype])
 
+		self._registerCommands()
+
+	def _registerCommands(self):
 		for f in dir(self):
 			attr = getattr(self, f)
 			if getattr(self, f) != None and hasattr(attr, "_command"):
@@ -197,53 +200,59 @@ class Hambone(MumbleBot):
 			self.setState(self.users[user['session']]['channel_id'], None, None, None)
 			self.sendToProper(msg_packet, "I will now attempt to follow %s." % user['name'])
 
-	dice = re.compile("([1-9][0-9]*?)d([1-9][0-9]*)")
+	dice = re.compile("([1-9][0-9]*?)?d([1-9][0-9]*)")
 
-	def roll_dice(self, msg_packet, user, result):
-		amount = result.group(1)
-		dice = int(result.group(2))
-
-		if not amount:
-			amount = 1
-		else:
-			amount = int(amount)
-
+	def rollDice(self, msg_packet, user, amount, dice):
 		die = []
 		for i in range(amount):
 			die.append(random.randrange(1, dice + 1))
 
-		self.sendToProper(msg_packet, "%s rolled %s for a total of %s." % (user['name'], die, sum(die)))
+		self.sendToProper(msg_packet, "%s rolled %id%i %s for a total of %i." % (user['name'], amount, dice, die, sum(die)))
 
 	@register
 	def roll(self, msg_packet, user, args):
 		random.seed()
-		n = 1
-		m = 6
+		if len(args) < 2:
+			amount = 1
+			dice = 6
 
-		if len(args) == 1:
-			result = self.dice.match(args[0])
-			if result:
-				self.roll_dice(msg_packet, user, result)
-				return
-			m = int(args[0])
+			if len(args) == 1:
+				result = self.dice.match(args[0])
+				if result:
+					amount = int(result.group(1)) if result.group(1) else 1
+					dice = int(result.group(2))
+				else:
+					try:
+						dice = int(args[0])
+					except ValueError:
+						raise CommandFailedError("'%s' is not a valid integer for maximum" % args[0])
+
+			self.rollDice(msg_packet, user, amount, dice)
 		elif len(args) == 2:
-			n = int(args[0])
-			m = int(args[1])
-		elif len(args) != 0:
-			raise CommandSyntaxError("/roll [minimum] [maximum]")
+			n = 0
+			m = 0
 
-		if n > m:
-			n, m = m, n
-		elif n == m:
-			if len(args) == 1 and n == 1 and m == 1:
-				n = 0
+			try:
+				n = int(args[0])
+			except ValueError:
+				raise CommandFailedError("'%s' is not a valid integer for minimum" % args[0])
+
+			try:
+				m = int(args[1])
+			except ValueError:
+				raise CommandFailedError("'%s' is not a valid integer for maximum" % args[1])
+
+			if n > m:
+				n, m = m, n
+			elif n == m:
+				if len(args) == 1 and n == 1 and m == 1:
+					n = 0
 			else:
 				raise CommandFailedError("Cannot roll when minimum equals maximum")
 
-		if n == 1:
-			self.sendToProper(msg_packet, "%s rolled a d%i and got %i." % (user['name'], m, random.randrange(n, m + 1)))
-		else:
 			self.sendToProper(msg_packet, "%s rolled between %i and %i and got %i." % (user['name'], n, m, random.randrange(n, m + 1)))
+		else:
+			raise CommandSyntaxError("/roll [minimum] [maximum] or /roll [amount]d[maximum] or /roll [maximum] or /roll")
 
 	@register
 	def pick(self, msg_packet, user, args):
@@ -252,7 +261,7 @@ class Hambone(MumbleBot):
 		random.seed()
 		self.sendToProper(msg_packet, "Hmmm, I pick '%s'." % random.choice(args))
 
-	def do_dance(self):
+	def doDance(self):
 		if not self.user['data']['dancing']:
 			return
 		for ele in self.users:
@@ -266,7 +275,7 @@ class Hambone(MumbleBot):
 			packet.session = self.users[ele]['session']
 			packet.actor = self.session
 			self.writeProtobuf(9, packet)
-		reactor.callLater(1, self.do_dance)
+		reactor.callLater(1, self.doDance)
 
 	@register
 	def dance(self, msg_packet, user, args):
@@ -279,7 +288,7 @@ class Hambone(MumbleBot):
 			elif args[0] == "start":
 				self.sendToProper(msg_packet, "Initializing dance party!")
 				self.user['data']['dancing'] = True
-				self.do_dance()
+				self.doDance()
 		else:
 			raise CommandSyntaxError("/dance <start|stop>")
 
@@ -292,7 +301,7 @@ class Hambone(MumbleBot):
 
 	@register
 	def quote(self, msg_packet, user, args):
-		self.sendMessageToChannel(self.users[self.session]['channel_id'], "Quote of the now: '%s'." % random.choice(self.user['data']['quotes']))
+		self.sendMessageToChannel(self.users[self.session]['channel_id'], "Quote of the now: %s." % random.choice(self.user['data']['quotes']))
 
 	def announceAway(self):
 		aways = []
