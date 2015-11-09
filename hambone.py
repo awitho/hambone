@@ -93,14 +93,6 @@ class Hambone(MumbleBot):
 
 	def initState(self, data):
 		self.user['data']['cbot'] = ChatterBotFactory().create(ChatterBotType.CLEVERBOT).create_session()
-		self.user['data']['quotes'] = [
-			"'give her the dick' -René Descartes",
-			"'I need a tap and die and some WD-40.' -Hank Hill",
-			"'The bitch went flying!' -Ben Szmalc",
-			"'It's all nice on ice.' -Isaac Brooke",
-			"'Do I look like I know what a jaypeg is?' -Hank Hill",
-			"'We need more quotes, man.' -Alex Bufanda"
-		]
 
 		if self.user['comment'] == "":
 			self.setComment("I am merely a bot.")
@@ -306,7 +298,7 @@ class Hambone(MumbleBot):
 
 	@register
 	def quote(self, msg_packet, user, args):
-		self.sendMessageToChannel(self.users[self.session]['channel_id'], "Quote of the now: %s." % random.choice(self.user['data']['quotes']))
+		self.sendMessageToChannel(self.users[self.session]['channel_id'], "Quote of the now: %s." % random.choice(config.quotes))
 
 	def announceAway(self):
 		aways = []
