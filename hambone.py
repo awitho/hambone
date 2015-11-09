@@ -116,6 +116,15 @@ class Hambone(MumbleBot):
 		else:
 			self.sendMessageToUser(msg_packet.actor, msg)
 
+	def hasPermission(self, user, command):
+		try:
+			if re.match(config.admins[user], command) is None:
+				return False
+		except KeyError:
+			if '@' not in config.admins or re.match(config.admins['@'], command) is None:
+				return False
+		return True
+
 	def parseMessage(self, data):
 		msg_packet = protobuf.TextMessage()
 		msg_packet.ParseFromString(data)
@@ -131,12 +140,8 @@ class Hambone(MumbleBot):
 				if command not in self.commands:
 					raise CommandFailedError("Invalid command: '%s', use /help to list available commands" % command)
 
-				try:
-					if re.match(config.admins[user['name']], command) is None:
-						raise PermissionsError("Insufficient permissions")
-				except KeyError:
-					if '@' not in config.admins or re.match(config.admins['@'], command) is None:
-						raise PermissionsError("Insufficient permissions")
+				if not self.hasPermission(user['name'], command):
+					raise PermissionsError("Insufficient permissions")
 
 				self.commands[command](self, msg_packet, user, args)
 				self.logger.info("%s ran command: '%s'." % (user['name'], msg_packet.message))
