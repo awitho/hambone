@@ -100,7 +100,8 @@ class Hambone(MumbleBot):
 		self.toggleDeafened()
 
 	def firstHeartbeat(self, data):
-		reactor.resolve("shio.moe").addCallback(lambda ip: reactor.listenUDP(57891, MumbleUDP(ip, self.key, self.client_nonce, self.server_nonce)))
+		if config.udp:
+			reactor.resolve("shio.moe").addCallback(lambda ip: reactor.listenUDP(57891, MumbleUDP(ip, self.key, self.client_nonce, self.server_nonce)))
 
 	def sendToProper(self, msg_packet, msg):
 		if (msg_packet.channel_id):
