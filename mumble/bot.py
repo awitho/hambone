@@ -3,13 +3,13 @@ import struct
 import logging
 import logging.handlers
 
+import protobuf
+from twisted.internet import reactor
+
 from . import html
 from . import packets
 from .protocol import MumbleProtocol
 from .objects import MumbleUser, MumbleChannel
-
-import protobuf
-from twisted.internet import reactor
 
 
 class MumbleHandler(logging.Handler):
@@ -310,7 +310,7 @@ class MumbleBot(MumbleProtocol):
 		msg_packet = protobuf.TextMessage()
 		msg_packet.actor = self.session
 		msg_packet.channel_id.append(channel)
-		msg_packet.message = str(msg)
+		msg_packet.message = unicode(msg, "utf-8")
 		self.writeProtobuf(11, msg_packet)
 
 	def sendMessageToUser(self, user, msg):
@@ -318,7 +318,7 @@ class MumbleBot(MumbleProtocol):
 		msg_packet = protobuf.TextMessage()
 		msg_packet.actor = self.session
 		msg_packet.session.append(user)
-		msg_packet.message = str(msg)
+		msg_packet.message = unicode(msg, "utf-8")
 		self.writeProtobuf(11, msg_packet)
 
 	def suggestedConfig(self, data):
