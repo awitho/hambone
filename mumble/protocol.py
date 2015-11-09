@@ -8,7 +8,6 @@ import logging
 
 from ocb.aes import AES
 from ocb import OCB
-
 from twisted.internet.protocol import Protocol, ConnectedDatagramProtocol
 
 from . import varint
@@ -36,6 +35,7 @@ class MumbleProtocol(Protocol):
 		self.expecting = []
 
 		self.packets_received = 0
+		self.chunked_packet = False
 
 	def connectionMade(self):
 		pass
@@ -63,9 +63,18 @@ class MumbleProtocol(Protocol):
 		self.transport.write(pstr)
 
 	def interpretType(self, data):
-		self.packet_type = struct.unpack("!h", data[0:2])[0]
-		self.packet_len = struct.unpack("!i", data[2:6])[0]
-		self.packet = data[6:6 + self.packet_len]
+		if not self.chunked_packet:
+			self.packet_type = struct.unpack("!h", data[0:2])[0]
+			self.packet_len = struct.unpack("!i", data[2:6])[0]
+			self.packet = data[6:6 + self.packet_len]
+		else:
+			self.packet = self.packet + data[0:self.packet_len - len(self.packet)]
+
+		if len(self.packet) < self.packet_len:
+			self.chunked_packet = True
+			return
+		else:
+			self.chunked_packet = False
 
 		self.packets_received += 1
 
