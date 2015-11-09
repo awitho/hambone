@@ -83,7 +83,10 @@ class Hambone(MumbleBot):
 		for f in dir(self):
 			attr = getattr(self, f)
 			if getattr(self, f) != None and hasattr(attr, "_command"):
-				self.commands[f] = getattr(self, f)
+				self.registerCommand(f, getattr(self, f))
+
+	def registerCommand(self, command, f):
+		self.commands[command] = f
 
 	def userJoined(self, user):
 		self.logger.info("%s joined." % user['name'])
