@@ -197,6 +197,23 @@ class Hambone(MumbleBot):
 			self.setState(self.users[user['session']]['channel_id'], None, None, None)
 			self.sendToProper(msg_packet, "I will now attempt to follow %s." % user['name'])
 
+	dice = re.compile("([1-9][0-9]*?)d([1-9][0-9]*)")
+
+	def roll_dice(self, msg_packet, user, result):
+		amount = result.group(1)
+		dice = int(result.group(2))
+
+		if not amount:
+			amount = 1
+		else:
+			amount = int(amount)
+
+		die = []
+		for i in range(amount):
+			die.append(random.randrange(1, dice + 1))
+
+		self.sendToProper(msg_packet, "%s rolled %s for a total of %s." % (user['name'], die, sum(die)))
+
 	@register
 	def roll(self, msg_packet, user, args):
 		random.seed()
@@ -204,6 +221,10 @@ class Hambone(MumbleBot):
 		m = 6
 
 		if len(args) == 1:
+			result = self.dice.match(args[0])
+			if result:
+				self.roll_dice(msg_packet, user, result)
+				return
 			m = int(args[0])
 		elif len(args) == 2:
 			n = int(args[0])
@@ -220,9 +241,9 @@ class Hambone(MumbleBot):
 				raise CommandFailedError("Cannot roll when minimum equals maximum")
 
 		if n == 1:
-			self.sendToProper(msg_packet, "%s rolled a d%i and got %i." % (user['name'], m, random.randrange(n, m)))
+			self.sendToProper(msg_packet, "%s rolled a d%i and got %i." % (user['name'], m, random.randrange(n, m + 1)))
 		else:
-			self.sendToProper(msg_packet, "%s rolled between %i and %i and got %i." % (user['name'], n, m, random.randrange(n, m)))
+			self.sendToProper(msg_packet, "%s rolled between %i and %i and got %i." % (user['name'], n, m, random.randrange(n, m + 1)))
 
 	@register
 	def pick(self, msg_packet, user, args):
