@@ -345,7 +345,11 @@ class Hambone(MumbleBot):
 
 	@register
 	def help(self, msg_packet, user, args):
-		self.sendToProper(msg_packet, "Commands are:\n%s" % self.commands.keys())
+		commands = []
+		for command in self.commands.keys():
+			if self.hasPermission(user['name'], command):
+				commands.append(command)
+		self.sendToProper(msg_packet, "Commands are:\n%s" % commands)
 
 	@register
 	def dump(self, msg_packet, user, args):
