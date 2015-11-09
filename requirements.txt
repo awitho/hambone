@@ -1,0 +1,4 @@
+protobuf
+Twisted
+pyOpenSSL
+pyocb
