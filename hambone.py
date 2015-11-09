@@ -6,7 +6,7 @@ import random
 import traceback
 import shlex
 
-from chatterbotapi import ChatterBotFactory, ChatterBotType
+from lib.chatterbotapi import ChatterBotFactory, ChatterBotType
 from twisted.internet import reactor
 from functools import wraps
 
