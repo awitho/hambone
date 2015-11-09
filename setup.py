@@ -11,9 +11,9 @@ base = None
 #    base = "Win32GUI"
 
 setup(
-	name="mumble_bot",
+	name="Hambone",
 	version="0.1",
-	description="fat",
+	description="Twisted based mumble bot.",
 	# options = {"build_exe": build_exe_options},
-	executables=[Executable("mumble_bot.py", base=base)]
+	executables=[Executable("runner.py", base=base)]
 )
