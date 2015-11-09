@@ -1,5 +1,6 @@
 import sys
 sys.dont_write_bytecode = True
+import config
 import hambone
 
 from twisted.internet import reactor
@@ -41,11 +42,11 @@ class CtxFactory(ClientContextFactory):
 		self.method = SSL.SSLv23_METHOD
 
 		ctx = ClientContextFactory.getContext(self)
-		ctx.use_certificate_file('keys\client.crt')
-		ctx.use_privatekey_file('keys\client.key')
+		ctx.use_certificate_file(config.key[0])
+		ctx.use_privatekey_file(config.key[1])
 
 		return ctx
 
 if __name__ == "__main__":
-	reactor.connectSSL("shio.moe", 64738, HamboneFactory(), CtxFactory())
+	reactor.connectSSL(config.host[0], config.host[1], HamboneFactory(), CtxFactory())
 	reactor.run()
