@@ -1,13 +1,19 @@
+
+# coding=utf-8
+
 import sys
-sys.dont_write_bytecode = True
-import config
-import hambone
 
 from twisted.internet import reactor
 from twisted.internet.ssl import ClientContextFactory
 from twisted.internet.protocol import Factory
 from twisted.internet.error import ConnectionAborted
 from OpenSSL import SSL
+
+import config
+import hambone
+
+if sys.version_info[0] >= 3:
+	from importlib import reload
 
 
 class HamboneFactory(Factory):
@@ -21,12 +27,12 @@ class HamboneFactory(Factory):
 		pass
 
 	def clientConnectionFailed(self, connector, reason):
-		pass
+		reactor.stop()
 
 	def clientConnectionLost(self, connector, reason):
 		try:
 			reason.raiseException()
-		except ConnectionAborted:
+		except (ConnectionAborted, SSL.Error):
 			reactor.stop()
 			return
 		except:
@@ -35,13 +41,10 @@ class HamboneFactory(Factory):
 
 
 class CtxFactory(ClientContextFactory):
-	def __init__(self):
-		pass
+	isClient = 1
 
 	def getContext(self):
-		self.method = SSL.SSLv23_METHOD
-
-		ctx = ClientContextFactory.getContext(self)
+		ctx = SSL.Context(SSL.TLSv1_METHOD)
 		ctx.use_certificate_file(config.key[0])
 		ctx.use_privatekey_file(config.key[1])
 

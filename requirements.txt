@@ -2,3 +2,5 @@ protobuf
 Twisted
 pyOpenSSL
 pyocb
+service_identity
+requests

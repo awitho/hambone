@@ -1,13 +1,12 @@
 import sys
-import struct
 import logging
 import logging.handlers
 
-import protobuf
 from twisted.internet import reactor
 
 from . import html
 from . import packets
+from . import protobuf
 from .protocol import MumbleProtocol
 from .objects import MumbleUser, MumbleChannel
 
@@ -49,10 +48,13 @@ class MumbleBot(MumbleProtocol):
 
 		self.users = {}
 		self.channels = {}
+		self.session = None
 
 		self.name = name
 
 		self.server_password = None
+
+		self.max_msg_len = 1024  # sane default?
 
 		self.createHandlers()
 
@@ -69,10 +71,10 @@ class MumbleBot(MumbleProtocol):
 			console.setFormatter(self.format)
 			self.logger.addHandler(console)
 
-			mumble = MumbleHandler(self)
-			mumble.setFormatter(self.s_format)
-			mumble.setLevel(logging.WARNING)
-			self.logger.addHandler(mumble)
+		mumble = MumbleHandler(self)
+		mumble.setFormatter(self.s_format)
+		mumble.setLevel(logging.WARNING)
+		self.logger.addHandler(mumble)
 
 	def connectionMade(self):
 		if self.wasConnected:
@@ -93,29 +95,29 @@ class MumbleBot(MumbleProtocol):
 	def createHandlers(self):
 		handlers = {
 			packets.VERSION: self.storeVersion,
-			# 1: pass,
+			packets.UDPTUNNEL: None,
 			packets.AUTHENTICATE: self.receiveAuth,
-			# packets.PING: self.receiveHearbeat,
+			packets.PING: None,  # self.receiveHeartbeat,
 			packets.REJECT: self.throwRejection,
 			packets.SERVERSYNC: self.syncWithServer,
-			# 6: pass,
+			packets.CHANNELREMOVE: None,
 			packets.CHANNELSTATE: self.checkChannel,
 			packets.USERREMOVE: self.removeUser,
 			packets.USERSTATE: self.checkUser,
-			# 10: pass,
-			# packets.TEXTMESSAGE: pass,
-			# packets.PERMISSIONDENIED: pass
-			# 13: pass,
-			# 14: pass,
+			packets.BANLIST: None,
+			packets.TEXTMESSAGE: None,
+			packets.PERMISSIONDENIED: None,
+			packets.ACL: None,
+			packets.QUERYUSERS: None,
 			packets.CRYPTSETUP: self.setupAuth,
-			# 16: pass,
-			# 17: pass,
-			# 18: pass,
-			# 19: pass,
-			# 20: pass,
-			# 21: pass,
-			# 22: pass,
-			# 23: pass,
+			packets.CONTEXTACTIONMODIFY: None,
+			packets.CONTEXTACTION: None,
+			packets.USERLIST: None,
+			packets.VOICETARGET: None,
+			packets.PERMISSIONQUERY: None,
+			packets.CODECVERSION: None,
+			packets.USERSTATS: None,
+			packets.REQUESTBLOB: None,
 			packets.SERVERCONFIG: self.acceptConfigs,
 			packets.SUGGESTCONFIG: self.suggestedConfig,
 		}
@@ -125,9 +127,17 @@ class MumbleBot(MumbleProtocol):
 
 	def setUsername(self, name):
 		self.user['name'] = name
+		state_packet = protobuf.UserState()
+		state_packet.name = self.user['name']
+		state_packet.session = self.session
+		self.writeProtobuf(packets.USERSTATE, state_packet)
 
 	def setComment(self, text):
 		self.user['comment'] = text
+		state_packet = protobuf.UserState()
+		state_packet.comment = self.user['comment']
+		state_packet.session = self.session
+		self.writeProtobuf(packets.USERSTATE, state_packet)
 
 	def setChannel(self, channel_id):
 		self.user['channel_id'] = channel_id
@@ -145,7 +155,9 @@ class MumbleBot(MumbleProtocol):
 		self.writeProtobuf(packets.USERSTATE, state_packet)
 
 	def syncState(self):
-		self.writeProtobuf(packets.USERSTATE, self.user.to_protobuf())
+		state_packet = self.user.to_protobuf()
+		state_packet.ClearField("user_id")
+		self.writeProtobuf(packets.USERSTATE, state_packet)
 
 	def sendVersion(self):
 		local_version = protobuf.Version()
@@ -163,7 +175,7 @@ class MumbleBot(MumbleProtocol):
 		self.authenticate()
 
 	def receiveAuth(self, data):
-		pass
+		raise NotImplementedError()
 
 	def setupAuth(self, data):
 		auth_packet = protobuf.CryptSetup()
@@ -288,11 +300,14 @@ class MumbleBot(MumbleProtocol):
 		self.updateChannel(state_packet)
 
 	def findUser(self, name):
-		# todo: list comprehension.
-		for (session, user) in list(self.users.items()):
-			if user['name'].find(name) == 0:
-				return user['session']
-		return -1
+		return [user for (session, user) in list(self.users.items()) if user['name'].find(name) == 0]
+
+	def kickUser(self, user, reason="Unspecified"):
+		state_packet = protobuf.UserRemove()
+		state_packet.session = user['session']
+		state_packet.reason = reason
+
+		self.writeProtobuf(packets.USERREMOVE, state_packet)
 
 	def removeUser(self, data):
 		state_packet = protobuf.UserRemove()
@@ -306,25 +321,27 @@ class MumbleBot(MumbleProtocol):
 			self.logger.error("Could not remove user: %s." % self.users[int(state_packet.session)])
 
 	def sendMessageToChannel(self, channel, msg):
-		self.logger.debug("Sending message to channel %i:\n\t%s." % (channel, msg))
+		self.logger.debug("Sending message to channel %i:\n\t%s" % (channel, msg))
 		msg_packet = protobuf.TextMessage()
 		msg_packet.actor = self.session
 		msg_packet.channel_id.append(channel)
-		try:
-			msg_packet.message = unicode(msg, "utf-8")
-		except TypeError:
-			msg_packet.message = msg
+		if isinstance(msg, bytes):
+			msg = msg.decode('utf-8')
+		elif not isinstance(msg, str):
+			msg = str(msg)
+		msg_packet.message = msg
 		self.writeProtobuf(11, msg_packet)
 
 	def sendMessageToUser(self, user, msg):
-		self.logger.debug("Sending message to user %i:\n\t%s." % (user, msg))
+		self.logger.debug("Sending message to user %i:\n\t%s" % (user, msg))
 		msg_packet = protobuf.TextMessage()
 		msg_packet.actor = self.session
 		msg_packet.session.append(user)
-		try:
-			msg_packet.message = unicode(msg, "utf-8")
-		except TypeError:
-			msg_packet.message = msg
+		if isinstance(msg, bytes):
+			msg = msg.decode('utf-8')
+		elif not isinstance(msg, str):
+			msg = str(msg)
+		msg_packet.message = msg
 		self.writeProtobuf(11, msg_packet)
 
 	def suggestedConfig(self, data):

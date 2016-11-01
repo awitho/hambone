@@ -1,4 +1,4 @@
-from protobuf import UserState, ChannelState
+from .protobuf import UserState, ChannelState
 
 
 class Protobuf(dict):

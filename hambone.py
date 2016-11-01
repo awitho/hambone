@@ -1,16 +1,30 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+# stdlib
+import copy
 import re
 import random
 import traceback
 import shlex
 
-from lib.chatterbotapi import ChatterBotFactory, ChatterBotType
-from twisted.internet import reactor
-from functools import wraps
+# stdlib from imports
+from enum import Enum
 
+# global libraries from imports
+from bs4 import BeautifulSoup
+from twisted.internet import reactor
+
+# local libraries from imports
+from volvo.scripts.games_diff import diff_games
+from volvo.api import SteamAPI, ResponseException
+from volvo.steamid import SteamID
+from lib.chatterbotapi import ChatterBotFactory, ChatterBotType, ChatterBotException
+
+# personal libraries
 import config
+
+# personal libraries from imports
 from mumble import packets, protobuf, html
 from mumble.protocol import MumbleUDP
 from mumble.bot import MumbleBot
@@ -52,6 +66,11 @@ def shlex_split(x):
 	return ["".join(endofline)]
 
 
+def listify(array, separator=", ", end_separator=" & "):
+	last = array.pop()
+	return "%s%s%s" % (separator.join(array), end_separator, last)
+
+
 class register():
 	_command = True
 
@@ -62,15 +81,50 @@ class register():
 		return self.f(*args, **kwargs)
 
 
+def interface_send(target, message):
+	pass
+
+
+class PermissionGroup(object):
+	@staticmethod
+	def hasCommand(data, command):
+		if 'superuser' in data and data['superuser']:
+			return True
+		if command in data['commands']:
+			return True
+		elif 'parent' in data:
+			return PermissionGroup.hasCommand(data['parent'], command)
+		else:
+			return False
+
+
+class Command(object):
+	def __init__(self, *args, **kwargs):
+		super(Command, self).__init__(*args, **kwargs)
+		self.name = None
+		self.args = None
+		self.type = None
+		self.user = None
+		self.message = None
+
+
+class CommandType(Enum):
+	TARGET_ADAPTIVE = 1
+	TARGET_CHANNEL = 2
+	TARGET_PRIVATE = 3
+	TARGET_CBOT = 4
+
+
 class Hambone(MumbleBot):
 	commands = {}
-	command_matcher = re.compile("^/(.*)")
+	command_delimiters = {"/": CommandType.TARGET_ADAPTIVE, "!": CommandType.TARGET_CHANNEL, "%": CommandType.TARGET_PRIVATE}
 
 	def __init__(self, name="Hambone", *args, **kwargs):
 		MumbleBot.__init__(self, name=name, *args, **kwargs)
 
 		handlers = {
 			packets.SERVERSYNC: self.initState,
+			packets.PERMISSIONDENIED: self.permissionDenied,
 			packets.TEXTMESSAGE: self.parseMessage,
 		}
 
@@ -78,33 +132,67 @@ class Hambone(MumbleBot):
 			self.addHandler(ptype, handlers[ptype])
 
 		self._registerCommands()
+		self.setupGroups(config)
 
 	def _registerCommands(self):
 		for f in dir(self):
 			attr = getattr(self, f)
-			if getattr(self, f) != None and hasattr(attr, "_command"):
+			if getattr(self, f) is not None and hasattr(attr, "_command"):
 				self.registerCommand(f, getattr(self, f))
 
 	def registerCommand(self, command, f):
 		self.commands[command] = f
 
+	def setupGroups(self, config):
+		self.groups = {}
+		self.default_group = None
+		# parent groups to each other, circular references is going to murder this
+		for (name, group) in copy.deepcopy(config.groups).items():
+			if name in self.groups:
+				return
+			if 'parent' in group:
+				if group['parent'] in config.groups:
+					group['parent'] = config.groups[group['parent']]
+				else:
+					self.logger.warning("Could not find parent %s for group %s." % (group['parent'], name))
+
+			if 'default' in group and group['default']:
+				self.default_group = name
+
+			self.groups[name] = group
+
 	def userJoined(self, user):
-		self.logger.info("%s joined." % user['name'])
+		if user['name'] in config.users:
+			self.users[user['session']]['data']['group'] = config.users[user['name']]
+		else:
+			self.users[user['session']]['data']['group'] = self.default_group
+
+		if self.session is not None:
+			greeting = config.greeting
+			if not isinstance(greeting, list):
+				greeting = [greeting]
+			for line in greeting:
+				self.sendMessageToUser(user['session'], line)
+		self.logger.info("%s:%d joined." % (user['name'], user['session']))
 
 	def userLeft(self, user):
-		self.logger.info("%s left." % user['name'])
+		self.logger.info("%s:%d left." % (user['name'], user['session']))
+
+	def permissionDenied(self, data):
+		permission_packet = protobuf.PermissionDenied()
+		permission_packet.ParseFromString(data)
+		self.logger.warning("Permission denied: %s (%s)" % (permission_packet.reason, protobuf.PermissionDenied.DenyType.Name(permission_packet.type)))
 
 	def initState(self, data):
-		self.user['data']['cbot'] = ChatterBotFactory().create(ChatterBotType.CLEVERBOT).create_session()
+		self.toggleDeafened()
 
 		if self.user['comment'] == "":
 			self.setComment("I am merely a bot.")
 
-		self.toggleDeafened()
-
 	def firstHeartbeat(self, data):
 		if config.udp:
-			reactor.resolve("shio.moe").addCallback(lambda ip: reactor.listenUDP(57891, MumbleUDP(ip, self.key, self.client_nonce, self.server_nonce)))
+			host = self.transport.getHost()
+			reactor.listenUDP(host.port, MumbleUDP(host.host, self.key, self.client_nonce, self.server_nonce))
 
 	def sendToProper(self, msg_packet, msg):
 		if (msg_packet.channel_id):
@@ -113,54 +201,77 @@ class Hambone(MumbleBot):
 			self.sendMessageToUser(msg_packet.actor, msg)
 
 	def hasPermission(self, user, command):
-		try:
-			if re.match(config.admins[user], command) is None:
-				return False
-		except KeyError:
-			if '@' not in config.admins or re.match(config.admins['@'], command) is None:
-				return False
-		return True
+		return PermissionGroup.hasCommand(self.groups[user['data']['group']], command)
 
 	def parseMessage(self, data):
 		msg_packet = protobuf.TextMessage()
 		msg_packet.ParseFromString(data)
-		user = msg_packet.actor
-		result = self.command_matcher.match(html.unescape(msg_packet.message))
+
+		command = Command()
+		command.message = BeautifulSoup(msg_packet.message[1:], "lxml").get_text()
+		try:
+			command.type = Hambone.command_delimiters[msg_packet.message[0]]
+		except KeyError:
+			return
 
 		try:
+			command.sender = self.users[msg_packet.actor]
+			command.args = shlex_split(command.message)
+			command.name = command.args.pop(0).lower()
+
+			if command.name not in self.commands:
+				raise CommandFailedError("Invalid command: '%s', use /help to list available commands" % command.name)
+
+			if not self.hasPermission(command.sender, command.name):
+				raise PermissionsError("Insufficient permissions")
+
+			result = self.commands[command.name](self, msg_packet, command)
 			if result:
-				user = self.users[msg_packet.actor]
-				args = shlex_split(result.group(1))
-				command = args.pop(0).decode("UTF-8").lower()
+				if not isinstance(result, list):
+					result = [result]
 
-				if command not in self.commands:
-					raise CommandFailedError("Invalid command: '%s', use /help to list available commands" % command)
+				send_method = interface_send
+				target = None
+				if command.type == CommandType.TARGET_ADAPTIVE:
+						send_method = self.sendToProper
+						target = msg_packet
+				elif command.type == CommandType.TARGET_CHANNEL:
+						send_method = self.sendMessageToChannel
+						target = self.user['channel_id']
+				elif command.type == CommandType.TARGET_PRIVATE:
+						target = msg_packet.actor
+						send_method = self.sendMessageToUser
+				buff = ""
+				suffix = "<br/>"
+				if len(result) != 1:
+					for output in result:
+						if len(buff) + len(output) + len(suffix) >= self.max_msg_len:
+							send_method(target, buff)
+							buff = ""
+						else:
+							buff += (output + suffix)
+					if len(buff) > 0:
+						send_method(target, buff)
+				else:
+					send_method(target, result[0])
 
-				if not self.hasPermission(user['name'], command):
-					raise PermissionsError("Insufficient permissions")
-
-				self.commands[command](self, msg_packet, user, args)
-				self.logger.info("%s ran command: '%s'." % (user['name'], msg_packet.message))
-			elif re.match("^#", msg_packet.message):
-				msg = msg_packet.message[1:].encode("ascii")
-				task = reactor.callLater(3, self.sendToProper, self, msg_packet, "I'm thinking...")
-				self.sendToProper(msg_packet, self.user['data']['cbot'].think(msg))
-				task.cancel()
+			self.logger.info("%s ran command: '%s'." % (command.sender['name'], msg_packet.message))
 		except (CommandFailedError, PermissionsError) as e:
-			self.logger.error("Failed to run command '%s' due to: %s." % (command, e))
+			self.logger.error("Failed to run command '%s' due to: %s." % (command.name, e))
 		except CommandSyntaxError as e:
 			self.logger.error("Invalid command syntax try: %s" % e)
 		except:
 			self.logger.error("Failed to run command '%s' with:\n%s" % (msg_packet.message, traceback.format_exc()))
 
 	@register
-	def greet(self, msg_packet, user, args):
-		channel = self.channels[user['channel_id']]
-		self.sendToProper(msg_packet, "Hello %s [%i], the current channel you are in is %s [%i]." % (user['name'], user['user_id'], channel['name'], channel['channel_id']))
+	def greet(self, msg_packet, command):
+		channel = self.channels[command.sender['channel_id']]
+		return "Hello %s [%i], the current channel you are in is %s [%i]." % (command.sender['name'], command.sender['user_id'], channel['name'], channel['channel_id'])
 
 	@register
-	def come(self, msg_packet, user, args):
-		self.setState(user['channel_id'], None, None, None)
+	def come(self, msg_packet, command):
+		self.sendMessageToUser(command.sender['session'], "Right away, master.")
+		self.setState(command.sender['channel_id'], None, None, None)
 
 	def followUser(self, data):
 		state_packet = protobuf.UserState()
@@ -170,36 +281,34 @@ class Hambone(MumbleBot):
 			self.setState(self.users[state_packet.session]['channel_id'], None, None, None)
 
 	@register
-	def follow(self, msg_packet, user, args):
-		if len(args) != 1:
+	def follow(self, msg_packet, command):
+		if len(command.args) != 1:
 			raise CommandSyntaxError("/follow <user|@stop|@me>")
 
-		if args[0].find("@stop") == 0:
+		if command.args[0].find("@stop") == 0:
 			if 'follow' not in self.user['data']:
-				self.sendToProper(msg_packet, "I am not following anyone.")
-				return
+				return "I am not following anyone."
 
 			self.removeHandler(9, self.user['data']['follow'])
 			del self.user['data']['following']
 			del self.user['data']['follow']
 
-			self.sendToProper(msg_packet, "I will now stop following.")
+			return "I will now stop following."
 		else:
-			if args[0].find("@me") == -1:
-				user = self.users[self.findUser(args[0])]
+			if command.args[0].find("@me") == -1:
+				user = self.users[self.findUser(command.args[0])]
 
 			if user == -1:
-				raise CommandFailedError("Could not find user '%s'" % args[0])
+				raise CommandFailedError("Could not find user '%s'" % command.args[0])
 
 			if 'follow' in self.user['data']:
-				self.sendToProper(msg_packet, "I am already following a user.")
-				return
+				return "I am already following a user."
 
 			self.user['data']['following'] = user['session']
 			self.user['data']['follow'] = self.addHandler(9, self.followUser)
 
 			self.setState(self.users[user['session']]['channel_id'], None, None, None)
-			self.sendToProper(msg_packet, "I will now attempt to follow %s." % user['name'])
+			return "I will now attempt to follow %s." % user['name']
 
 	dice = re.compile("([1-9][0-9]*?)?d([1-9][0-9]*)")
 
@@ -208,59 +317,56 @@ class Hambone(MumbleBot):
 		for i in range(amount):
 			die.append(random.randrange(1, dice + 1))
 
-		self.sendToProper(msg_packet, "%s rolled %id%i %s for a total of %i." % (user['name'], amount, dice, die, sum(die)))
+		return "%s rolled %id%i (%s) for a total of %i." % (user['name'], amount, dice, " + ".join([str(i) for i in die]), sum(die))
 
 	@register
-	def roll(self, msg_packet, user, args):
+	def roll(self, msg_packet, command):
 		random.seed()
-		if len(args) < 2:
+		if len(command.args) < 2:
 			amount = 1
 			dice = 6
 
-			if len(args) == 1:
-				result = self.dice.match(args[0])
+			if len(command.args) == 1:
+				result = self.dice.match(command.args[0])
 				if result:
 					amount = int(result.group(1)) if result.group(1) else 1
 					dice = int(result.group(2))
 				else:
 					try:
-						dice = int(args[0])
+						dice = int(command.args[0])
 					except ValueError:
-						raise CommandFailedError("'%s' is not a valid integer for maximum" % args[0])
+						raise CommandFailedError("'%s' is not a valid integer for maximum" % command.args[0])
 
-			self.rollDice(msg_packet, user, amount, dice)
-		elif len(args) == 2:
-			n = 0
-			m = 0
-
-			try:
-				n = int(args[0])
-			except ValueError:
-				raise CommandFailedError("'%s' is not a valid integer for minimum" % args[0])
+			return self.rollDice(msg_packet, command.sender, amount, dice)
+		elif len(command.args) == 2:
+			n = 1
+			m = 6
 
 			try:
-				m = int(args[1])
+				n = int(command.args[0])
 			except ValueError:
-				raise CommandFailedError("'%s' is not a valid integer for maximum" % args[1])
+				raise CommandFailedError("'%s' is not a valid integer for minimum" % command.args[0])
+
+			try:
+				m = int(command.args[1])
+			except ValueError:
+				raise CommandFailedError("'%s' is not a valid integer for maximum" % command.args[1])
 
 			if n > m:
 				n, m = m, n
 			elif n == m:
-				if len(args) == 1 and n == 1 and m == 1:
-					n = 0
-			else:
 				raise CommandFailedError("Cannot roll when minimum equals maximum")
 
-			self.sendToProper(msg_packet, "%s rolled between %i and %i and got %i." % (user['name'], n, m, random.randrange(n, m + 1)))
+			return "%s rolled between %i and %i and got %i." % (command.sender['name'], n, m, random.randrange(n, m + 1))
 		else:
 			raise CommandSyntaxError("/roll [minimum] [maximum] or /roll [amount]d[maximum] or /roll [maximum] or /roll")
 
 	@register
-	def pick(self, msg_packet, user, args):
-		if (len(args) <= 1):
+	def pick(self, msg_packet, command):
+		if (len(command.args) <= 1):
 			raise CommandSyntaxError("/pick <object> ...")
 		random.seed()
-		self.sendToProper(msg_packet, "Hmmm, I pick '%s'." % random.choice(args))
+		return "Hmmm, I pick '%s'." % random.choice(command.args)
 
 	def doDance(self):
 		if not self.user['data']['dancing']:
@@ -279,30 +385,29 @@ class Hambone(MumbleBot):
 		reactor.callLater(1, self.doDance)
 
 	@register
-	def dance(self, msg_packet, user, args):
-		if len(args) == 1:
-			if args[0] == "stop":
-				if 'dancing' not in self.user['data'] or not self.user['data']['dancing']:
-					self.sendToProper(msg_packet, "No dancy party has been started!")
-					return
-				self.user['data']['dancing'] = False
-			elif args[0] == "start":
-				self.sendToProper(msg_packet, "Initializing dance party!")
-				self.user['data']['dancing'] = True
-				self.doDance()
-		else:
+	def dance(self, msg_packet, command):
+		if len(command.args) < 1:
 			raise CommandSyntaxError("/dance <start|stop>")
+		subcommand = command.args.pop(0).lower()
+		if subcommand == "stop":
+			if 'dancing' not in self.user['data'] or not self.user['data']['dancing']:
+				return "No dancy party has been started!"
+			self.user['data']['dancing'] = False
+			return "Winding the party down... :("
+		elif subcommand == "start":
+			self.user['data']['dancing'] = True
+			self.doDance()
+			return "Initializing dance party!"
 
 	echo_matcher = re.compile("^/\w* (.*)")
 
 	@register
-	def echo(self, msg_packet, user, args):
-		result = self.echo_matcher.match(html.unescape(msg_packet.message))
-		self.sendToProper(msg_packet, html.escape(result.group(1)))
+	def echo(self, msg_packet, command):
+		return msg_packet.message[1 + len(command.name) + 1:]
 
 	@register
-	def quote(self, msg_packet, user, args):
-		self.sendMessageToChannel(self.users[self.session]['channel_id'], "Quote of the now: %s." % random.choice(config.quotes))
+	def quote(self, msg_packet, command):
+		return "Quote of the now: %s" % random.choice(config.quotes)
 
 	def announceAway(self):
 		aways = []
@@ -314,56 +419,130 @@ class Hambone(MumbleBot):
 		reactor.callLater(30, self.announceAway)
 
 	@register
-	def away(self, msg_packet, user, args):
-		if 'away' not in user['data']:
-			user['data']['away'] = False
+	def away(self, msg_packet, command):
+		if 'away' not in command.sender['data']:
+			command.sender['data']['away'] = False
 
-		user['data']['away'] = not user['data']['away']
+		command.sender['data']['away'] = not command.sender['data']['away']
 
-		if user['data']['away'] is True:
-			self.sendMessageToChannel(user['channel_id'], "%s has went away." % user['name'])
-		elif user['data']['away'] is False:
-			self.sendMessageToChannel(user['channel_id'], "%s has come back from being away." % user['name'])
+		if command.sender['data']['away'] is True:
+			self.sendMessageToChannel(command.sender['channel_id'], "%s has went away." % command.sender['name'])
+		elif command.sender['data']['away'] is False:
+			self.sendMessageToChannel(command.sender['channel_id'], "%s has come back from being away." % command.sender['name'])
 		else:
 			raise CommandFailedError("Logic has failed us all.")
 
 	@register
-	def isaway(self, msg_packet, user, args):
-		if len(args) != 1:
+	def isaway(self, msg_packet, command):
+		if len(command.args) != 1:
 			raise CommandSyntaxError("/isaway <user>")
-		session = self.findUser(args[0])
+		session = self.findUser(command.args[0])
 		if session == -1:
-			raise CommandFailedError("Unable to find user by the name of '%s'" % args[0])
+			raise CommandFailedError("Unable to find user by the name of '%s'" % command.args[0])
 		user = self.users[session]
 		if 'away' not in user['data']:
 			user['data']['away'] = False
-		self.sendToProper(msg_packet, "%s away state is: %s." % (user['name'], user['data']['away']))
+		return "%s away state is: %s." % (user['name'], user['data']['away'])
 
 	@register
-	def help(self, msg_packet, user, args):
+	def help(self, msg_packet, command):
 		commands = []
-		for command in self.commands.keys():
-			if self.hasPermission(user['name'], command):
-				commands.append(command)
-		self.sendToProper(msg_packet, "Commands are:\n%s" % commands)
+		for command_name in self.commands.keys():
+			if self.hasPermission(command.sender, command_name):
+				commands.append(command_name)
+		return ["The command prefixes I have available are: %s" % ", ".join(["%s:%s" % (k, v.name) for (k, v) in self.command_delimiters.items()]), "The commands I have available are %s." % listify(commands)]
 
 	@register
-	def dump(self, msg_packet, user, args):
-		if len(args) != 1:
+	def dump(self, msg_packet, command):
+		if len(command.args) != 1:
 			raise CommandSyntaxError("/dump <users|channels>")
-		if args[0].find("users") == 0:
+		subcommand = command.args.pop()
+		if subcommand == "users":
 			for (session, user) in list(self.users.items()):
 				self.logger.debug("%i: %s" % (session, user))
-		elif args[0].find("channels") == 0:
+		elif subcommand == "channels":
 			for (i, channel) in list(self.channels.items()):
 				self.logger.debug("%i: %s" % (i, channel))
 		else:
-			raise CommandSyntaxError("Not a valid subcommand: %s" % args[0])
+			raise CommandSyntaxError("Not a valid subcommand: %s" % subcommand)
+
+	def chatterbotChatter(self, data):
+		msg_packet = protobuf.TextMessage()
+		msg_packet.ParseFromString(data)
+
+		if msg_packet.message[0] in Hambone.command_delimiters:
+			return
+
+		try:
+			self.sendToProper(msg_packet, html.escape(self.user['data']['cbot'].think(msg_packet.message)))
+		except ResponseException as r:
+			self.logger.error("Unsuccesful response: %s" ("<br/>".join([str(x) for x in [r.status_code, r.url, r.headers, r.cookies]])))
 
 	@register
-	def shutdown(self, msg_packet, user, args):
+	def chatterbot(self, msg_packet, command):
+		if len(command.args) < 1:
+			raise CommandSyntaxError("/chatterbot <type>")
+		chatterbot_type = command.args.pop(0).upper()
+		if chatterbot_type == "NONE":
+			self.removeHandler(packets.TEXTMESSAGE, self.user['data']['cbotid'])
+			del self.user['data']['cbotid']
+			del self.user['data']['cbot']
+			return "I have left chatterbot mode."
+
+		if 'cbotid' in self.user['data']:
+			return "I am already in chatterbot mode %s." % type(self.user['data']['cbot'])
+
+		try:
+			self.user['data']['cbot'] = ChatterBotFactory.create(ChatterBotType[chatterbot_type], *command.args)
+		except KeyError:
+			raise CommandFailedError("Invalid chatterbot '%s' type, available ones are: %s" % (chatterbot_type, listify([x.name for x in list(ChatterBotType)])))
+		self.user['data']['cbotid'] = self.addHandler(packets.TEXTMESSAGE, self.chatterbotChatter)
+		return "I have entered chatterbot mode %s." % chatterbot_type
+
+	@register
+	def define(self, msg_packet, command):
+		if len(command.args) < 1:
+			raise CommandSyntaxError("/define <word>")
+		word = command.args.pop(0).lower()
+		if word in config.definitions:
+			return "%s: %s" % (word, config.definitions[word])
+		return "I do not know how to define '%s'" % word
+
+	@register
+	def steam(self, msg_packet, command):
+		if len(command.args) < 1:
+			raise CommandSyntaxError("/steam <compare>")
+		subcommand = command.args.pop(0).lower()
+		if subcommand == "compare":
+			if len(command.args) < 2:
+				raise CommandSyntaxError("/steam compare <vanityurl|steamid|steamid64|steamid32> <vanityurl|steamid|steamid64|steamid32>...")
+
+			steamids = []
+			for id in command.args:
+				steamid = SteamID.from_unknown(id)
+				if steamid:
+					steamids.append(steamid.to_steamid64())
+				else:
+					steamids.append(SteamAPI.resolve_vanity(id))
+
+			games = diff_games(steamids)
+			message = [("<a href='steam://run/%s'>%s</a>" % (game['appid'], game['name'])).encode('utf-8', errors="replace") for game in sorted(games, key=lambda k: k['name'])]
+			message.insert(0, "Here are the games that %s have in common." % (listify(command.args)))
+			return message
+		elif subcommand == "id":
+			if len(command.args) != 1:
+				raise CommandSyntaxError("/steam id <vanityurl|steamid|steamid64|steamid32>")
+			steamid = SteamID.from_unknown(command.args[0])
+			if not steamid:
+				steamid = SteamID.from_steamid64(SteamAPI.resolve_vanity(command.args[0]))
+			return ["<br/>Given input: %s" % command.args[0], "Converted SteamID: %s" % (steamid.to_steamid()), "Converted SteamID64: %d" % (steamid.to_steamid64()), "Converted SteamID32: %s" % (steamid.to_steamid32())]
+		else:
+			raise CommandSyntaxError("/steam <compare>")
+
+	@register
+	def shutdown(self, msg_packet, command):
 		self.transport.abortConnection()
 
 	@register
-	def restart(self, msg_packet, user, args):
+	def restart(self, msg_packet, command):
 		self.transport.loseConnection()

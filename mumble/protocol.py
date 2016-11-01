@@ -1,16 +1,13 @@
 import struct
-import re
-import json
 import time
 import traceback
 import random
 import logging
 
-from ocb.aes import AES
-from ocb import OCB
-from twisted.internet.protocol import Protocol, ConnectedDatagramProtocol
+from .lib import varint
 
-from . import varint
+from Crypto.Cipher import AES
+from twisted.internet.protocol import Protocol, ConnectedDatagramProtocol
 
 
 class MumbleResponseError(Exception):
@@ -47,6 +44,8 @@ class MumbleProtocol(Protocol):
 		self.interpretType(data)
 
 	def addHandler(self, ptype, f):
+		if f is None:
+			return
 		if ptype not in self.handlers:
 			self.handlers[ptype] = []
 		# print("added handler for type: %i" % ptype)
@@ -54,13 +53,19 @@ class MumbleProtocol(Protocol):
 		return len(self.handlers[ptype]) - 1
 
 	def removeHandler(self, ptype, index):
+		if index is None:
+			return
 		del self.handlers[ptype][index]
 
 	def writeProtobuf(self, ptype, proto):
 		# print("Sending packet of id: %s." % ptype)
 		header = struct.pack("!h", ptype) + struct.pack("!i", proto.ByteSize())
-		pstr = header + proto.SerializeToString()
-		self.transport.write(pstr)
+		pstr = proto.SerializeToString()
+		self.transport.write(header + pstr[:1024])
+		if len(pstr) > 1024:
+			# print("Packet is longer than 1024 (%s), chunking." % (len(pstr)))
+			for i in range(1024, len(pstr) + 1, 1024):
+				self.transport.write(pstr[i:i + 1024])
 
 	def interpretType(self, data):
 		if not self.chunked_packet:
@@ -92,16 +97,40 @@ class MumbleProtocol(Protocol):
 			self.interpretType(data[6 + self.packet_len:])
 
 
-class MumbleUDP(ConnectedDatagramProtocol):
-	ping_header = 0b00100000
+class ConnectedOCBDatagramProtocol(ConnectedDatagramProtocol):
+	def __init__(self, ip, key, client_nonce, server_nonce, *args, **kwargs):
+		print(key, len(key))
+		print(client_nonce, len(client_nonce))
+		print(server_nonce, len(server_nonce))
+		self.ip = ip
+		self.key = bytes(key)
+		self.client_nonce = bytes(client_nonce)
+		self.server_nonce = bytes(server_nonce)
+
+		self.ocb = AES.new(self.key, AES.MODE_OCB, nonce=self.client_nonce)
+
+	def write(self, data):
+		# self.ocb.setNonce(self.client_nonce)
+		# (auth, plaintext) = self.ocb.decrypt(header, cipher, tag)
+		# print("Decrypted packet (%s): %s" % (auth, str(plaintext).encode("hex")))
+		# header = struct.pack('!BBBB', random.randint(0, 255), random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+		print("Writing: %s (%s)" % (data, len(data)))
+		(ciphertext, mac) = self.ocb.encrypt_and_digest(data)
+		self.transport.write(ciphertext)
+
+
+def hexlify(bytearray):
+	return ''.join(["%02x" % x for x in bytearray])
+
+
+class MumbleUDP(ConnectedOCBDatagramProtocol):
+	ping_header = bytes(0b00100000)
 	empty = bytearray()
 	format = logging.Formatter("%(asctime)-15s %(name)-3s | %(levelname)-6s: %(message)s")
 
-	def __init__(self, ip, key, client_nonce, server_nonce):
-		self.ip = ip
-		self.key = bytearray(key)
-		self.client_nonce = bytearray(client_nonce)
-		self.server_nonce = bytearray(server_nonce)
+	def __init__(self, *args, **kwargs):
+		super(MumbleUDP, self).__init__(*args, **kwargs)
+
 		self.logger = logging.getLogger("hambone-udp")
 		if self.logger.handlers == []:
 			self.logger.setLevel(logging.DEBUG)
@@ -114,10 +143,7 @@ class MumbleUDP(ConnectedDatagramProtocol):
 			console.setFormatter(self.format)
 			self.logger.addHandler(console)
 
-		self.logger.debug("OCB-AES128 Key: %s, Client Nonce: %s, Server Nonce: %s" % (str(self.key).encode('hex'), str(self.client_nonce).encode('hex'), str(self.server_nonce).encode('hex')))
-
-		self.ocb = OCB(AES(128))
-		self.ocb.setKey(self.key)
+		self.logger.debug("OCB-AES128 Key: %s, Client Nonce: %s, Server Nonce: %s" % (hexlify(self.key), hexlify(self.client_nonce), hexlify(self.server_nonce)))
 
 	def setVarint(self, obj):
 		print(obj)
@@ -141,35 +167,7 @@ class MumbleUDP(ConnectedDatagramProtocol):
 		return r
 
 	def sendPing(self):
-		# timestamp_int = int(round(time.time(), 0))
-		timestamp_int = int(time.time())
-		timestamp = bytearray()
-		varint.encodeVarint(timestamp.append, timestamp_int)
-		(result, pos) = varint.decodeVarint(str(timestamp), 0)
-		self.logger.debug("Timestamp encoded and then decoded is: %i, %i" % (timestamp_int, result))
-
-		packet = bytearray()
-		packet.append(self.ping_header)
-		timestamp = self.toBytearray(timestamp)
-		packet.extend(timestamp)
-
-		self.writePacket(packet)
-
-	def writePacket(self, packet):
-		self.logger.debug("Unencrypted packet: %s" % str(packet).encode('hex'))
-		self.ocb.setNonce(self.client_nonce)
-		header = bytearray(struct.pack('!BBBB', random.randint(0, 255), random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)))
-		(tag, cipher) = self.ocb.encrypt(packet, header)
-
-		# self.ocb.setNonce(self.client_nonce)
-		# (auth, plaintext) = self.ocb.decrypt(header, cipher, tag)
-		# print("Decrypted packet (%s): %s" % (auth, str(plaintext).encode("hex")))
-
-		packet = bytearray()
-		packet.extend(header)
-		packet.extend(cipher)
-		self.logger.debug("Sending packet with contents: %s (%s)" % (self.bytearrayToBinaryString(packet), str(packet).encode('hex')))
-		self.transport.write(packet)
+		self.write(self.ping_header + varint.encode(int(time.time())))
 
 	def startProtocol(self):
 		self.transport.connect(self.ip, 64738)
