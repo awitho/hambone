@@ -249,6 +249,8 @@ class Hambone(MumbleBot):
 							send_method(target, buff)
 							buff = ""
 						else:
+							if isinstance(output, bytes):
+								output = output.decode('utf-8')
 							buff += (output + suffix)
 					if len(buff) > 0:
 						send_method(target, buff)
@@ -475,6 +477,8 @@ class Hambone(MumbleBot):
 
 		try:
 			self.sendToProper(msg_packet, html.escape(self.user['data']['cbot'].think(msg_packet.message)))
+		except ChatterBotException:
+			self.logger.error("Failed to communicate with chatterbot:\n%s" % traceback.format_exc())
 		except ResponseException as r:
 			self.logger.error("Unsuccesful response: %s" ("<br/>".join([str(x) for x in [r.status_code, r.url, r.headers, r.cookies]])))
 
@@ -526,7 +530,7 @@ class Hambone(MumbleBot):
 					steamids.append(SteamAPI.resolve_vanity(id))
 
 			games = diff_games(steamids)
-			message = [("<a href='steam://run/%s'>%s</a>" % (game['appid'], game['name'])).encode('utf-8', errors="replace") for game in sorted(games, key=lambda k: k['name'])]
+			message = ["<a href='steam://run/%s'>%s</a>" % (game['appid'], game['name']) for game in sorted(games, key=lambda k: k['name'])]
 			message.insert(0, "Here are the games that %s have in common." % (listify(command.args)))
 			return message
 		elif subcommand == "id":
@@ -538,6 +542,16 @@ class Hambone(MumbleBot):
 			return ["<br/>Given input: %s" % command.args[0], "Converted SteamID: %s" % (steamid.to_steamid()), "Converted SteamID64: %d" % (steamid.to_steamid64()), "Converted SteamID32: %s" % (steamid.to_steamid32())]
 		else:
 			raise CommandSyntaxError("/steam <compare>")
+
+	def spamThink(self, message):
+		self.sendMessageToChannel(self.user['channel_id'], message)
+		reactor.callLater(0.1, self.spamThink, message)
+
+	@register
+	def spam(self, msg_packet, command):
+		if len(command.args) < 1:
+			raise CommandSyntaxError("/spam <message>")
+		self.spamThink(command.args[0])
 
 	@register
 	def shutdown(self, msg_packet, command):

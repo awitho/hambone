@@ -1,5 +1,6 @@
-import re
-import sys
+
+# coding=utf-8
+
 import hashlib
 import uuid
 
@@ -30,10 +31,6 @@ from lxml import etree
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-#################################################
-# API
-#################################################
-
 
 class GettableList(list):
 	def __init__(self, *args, default=None, **kwargs):
@@ -57,7 +54,7 @@ class ResponseException(ChatterBotException):
 
 class ChatterBotType(Enum):
 	CLEVERBOT = 1
-	# JABBERWACKY = 2
+	JABBERWACKY = 2
 	PANDORABOT = 3
 
 
@@ -66,8 +63,8 @@ class ChatterBotFactory:
 	def create(type, *args):
 		if type == ChatterBotType.CLEVERBOT:
 			return Cleverbot()
-		# elif type == ChatterBotType.JABBERWACKY:
-		# 	return Cleverbot(base_url="http://jabberwacky.com", service_url="http://jabberwacky.com/webservicemin", end_index=29)
+		elif type == ChatterBotType.JABBERWACKY:
+			return Cleverbot(base_url="http://jabberwacky.com", service_url="http://jabberwacky.com/webservicemin", end_index=29)
 		elif type == ChatterBotType.PANDORABOT:
 			if len(args) != 1:
 				raise ChatterBotException("Pandorabot needs a Bot ID argument try visiting here: %s." % ("http://pandorabots.com/botmaster/en/mostactive"))
@@ -75,13 +72,8 @@ class ChatterBotFactory:
 		return None
 
 
-#################################################
-# Cleverbot impl
-#################################################
-
-
 class Cleverbot(object):
-	def __init__(self, base_url="http://www.cleverbot.com", service_url="http://www.cleverbot.com/webservicemin?uc=165", end_index=35):
+	def __init__(self, base_url="http://www.cleverbot.com", service_url="http://www.cleverbot.com/webservicemin?uc=321", end_index=35):
 		self.service_url = service_url
 		self.end_index = end_index
 
@@ -116,10 +108,6 @@ class Cleverbot(object):
 		self.data['prevref'] = response_values.get(10)
 		return response_values.get(0)
 
-#################################################
-# Pandorabots impl
-#################################################
-
 
 class Pandorabot(object):
 	def __init__(self, botid):
@@ -129,9 +117,16 @@ class Pandorabot(object):
 		}
 
 	def think(self, text):
-		self.data['input'] = text
-		r = requests.post('http://www.pandorabots.com/pandora/talk-xml', params=self.data)
+		r = requests.post('http://www.pandorabots.com/pandora/talk-xml', params=self.data, data={"input": text})
 		if r.status_code != 200:
 			raise ResponseException(r)
-		text = etree.fromstring(r.text).find('that').text
-		return text if text is not None else ''
+		tree = etree.fromstring(r.text)
+		if tree is None:
+			raise ChatterBotException("Failed to parse XML from:\n%s" % r.text)
+		if int(tree.get("status")) != 0:
+			raise ChatterBotException("Invalid result status: %s" % tree.find("message").text)
+		that = tree.find("that")
+		if that is None:
+			raise ChatterBotException("Failed to find 'that':\n%s" % r.text)
+
+		return that.text
