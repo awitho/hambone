@@ -64,7 +64,7 @@ class ChatterBotFactory:
 		if type == ChatterBotType.CLEVERBOT:
 			return Cleverbot()
 		elif type == ChatterBotType.JABBERWACKY:
-			return Cleverbot(base_url="http://jabberwacky.com", service_url="http://jabberwacky.com/webservicemin", end_index=29)
+			return Cleverbot(base_url="http://jabberwacky.com", service_url="http://jabberwacky.com/webservicemin?botapi=chatterbotapi", end_index=29)
 		elif type == ChatterBotType.PANDORABOT:
 			if len(args) != 1:
 				raise ChatterBotException("Pandorabot needs a Bot ID argument try visiting here: %s." % ("http://pandorabots.com/botmaster/en/mostactive"))
@@ -73,7 +73,7 @@ class ChatterBotFactory:
 
 
 class Cleverbot(object):
-	def __init__(self, base_url="http://www.cleverbot.com", service_url="http://www.cleverbot.com/webservicemin?uc=321", end_index=35):
+	def __init__(self, base_url="http://www.cleverbot.com", service_url="http://www.cleverbot.com/webservicemin?uc=777&botapi=chatterbotapi", end_index=35):
 		self.service_url = service_url
 		self.end_index = end_index
 
@@ -90,7 +90,6 @@ class Cleverbot(object):
 	def think(self, text):
 		self.data['stimulus'] = text
 		data = urlencode(self.data)
-		print(data[9:self.end_index])
 		data += '&icognocheck=' + hashlib.md5(data[9:self.end_index].encode('utf-8')).hexdigest()
 		r = self.session.post(self.service_url, data=data)
 		if r.status_code != 200:

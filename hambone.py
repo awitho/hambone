@@ -332,6 +332,8 @@ class Hambone(MumbleBot):
 				result = self.dice.match(command.args[0])
 				if result:
 					amount = int(result.group(1)) if result.group(1) else 1
+					if amount > 1000:
+						raise CommandFailedError("'%s' is too large a number for amount of dice" % amount)
 					dice = int(result.group(2))
 				else:
 					try:
@@ -515,7 +517,7 @@ class Hambone(MumbleBot):
 	@register
 	def steam(self, msg_packet, command):
 		if len(command.args) < 1:
-			raise CommandSyntaxError("/steam <compare>")
+			raise CommandSyntaxError("/steam <compare|id>")
 		subcommand = command.args.pop(0).lower()
 		if subcommand == "compare":
 			if len(command.args) < 2:
@@ -541,7 +543,7 @@ class Hambone(MumbleBot):
 				steamid = SteamID.from_steamid64(SteamAPI.resolve_vanity(command.args[0]))
 			return ["<br/>Given input: %s" % command.args[0], "Converted SteamID: %s" % (steamid.to_steamid()), "Converted SteamID64: %d" % (steamid.to_steamid64()), "Converted SteamID32: %s" % (steamid.to_steamid32())]
 		else:
-			raise CommandSyntaxError("/steam <compare>")
+			raise CommandSyntaxError("/steam <compare|id>")
 
 	def spamThink(self, message):
 		self.sendMessageToChannel(self.user['channel_id'], message)
