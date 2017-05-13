@@ -135,8 +135,10 @@ class Hambone(MumbleBot):
 			packets.SERVERSYNC: self.initState,
 			packets.PERMISSIONDENIED: self.permissionDenied,
 			packets.TEXTMESSAGE: self.parseMessage,
-			packets.UDPTUNNEL: self.udpTunnel,
 		}
+
+		if config.audio:
+			self.addHandler(packets.UDPTUNNEL, self.udpTunnel)
 
 		for ptype in handlers.keys():
 			self.addHandler(ptype, handlers[ptype])
