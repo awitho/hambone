@@ -7,7 +7,7 @@ from twisted.internet import reactor
 from . import html
 from . import packets
 from . import protobuf
-from .protocol import MumbleProtocol
+from .protocol import MumbleProtocol, encodeVersion, decodeVersion
 from .objects import MumbleUser, MumbleChannel
 
 
@@ -161,7 +161,7 @@ class MumbleBot(MumbleProtocol):
 
 	def sendVersion(self):
 		local_version = protobuf.Version()
-		local_version.version = self.encodeVersion(1, 2, 10)
+		local_version.version = encodeVersion(1, 2, 10)
 		local_version.release = "1.2.10"
 		local_version.os = "Python"
 		local_version.os_version = str(sys.version_info.major) + "." + str(sys.version_info.minor) + "." + str(sys.version_info.micro)  # sys.version_info
@@ -214,12 +214,6 @@ class MumbleBot(MumbleProtocol):
 		config_packet = protobuf.ServerConfig()
 		config_packet.ParseFromString(data)
 		self.max_msg_len = config_packet.message_length
-
-	def encodeVersion(self, major, minor, patch):
-		return (major << 16) | (minor << 8) | (patch & 0xFF)
-
-	def decodeVersion(self, version):
-		return (version & ~0x0000FFFF) >> 16, (version & ~0xFFFF00FF) >> 8, (version & ~0xFFFFFF00)
 
 	def keepAlive(self):
 		if not self.connected:
@@ -348,5 +342,5 @@ class MumbleBot(MumbleProtocol):
 		sug_packet = protobuf.SuggestConfig()
 		sug_packet.ParseFromString(data)
 
-		t = self.decodeVersion(sug_packet.version) + (sug_packet.positional, sug_packet.push_to_talk,)
+		t = decodeVersion(sug_packet.version) + (sug_packet.positional, sug_packet.push_to_talk,)
 		self.logger.debug("Server suggests version: %i.%i.%i, positional: %s and ptt: %s" % t)

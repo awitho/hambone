@@ -7,9 +7,13 @@ import re
 import random
 import traceback
 import shlex
+import wave
 
 # stdlib from imports
+from io import BytesIO
 from enum import Enum
+
+import pyaudio
 
 # global libraries from imports
 from bs4 import BeautifulSoup
@@ -25,9 +29,12 @@ from lib.chatterbotapi import ChatterBotFactory, ChatterBotType, ChatterBotExcep
 import config
 
 # personal libraries from imports
-from mumble import packets, protobuf, html
-from mumble.protocol import MumbleUDP
+from mumble import packets, protobuf, html, constants
+from mumble.protocol import MumbleUDP, UDPMessageType
 from mumble.bot import MumbleBot
+from mumble.lib import varint, varint2
+from mumble.lib.opus.decoder import Decoder as OpusDecoder
+from mumble.lib.opus.encoder import Encoder as OpusEncoder
 
 
 class MumbleResponseError(Exception):
@@ -114,6 +121,8 @@ class CommandType(Enum):
 	TARGET_PRIVATE = 3
 	TARGET_CBOT = 4
 
+p = pyaudio.PyAudio()
+
 
 class Hambone(MumbleBot):
 	commands = {}
@@ -126,13 +135,62 @@ class Hambone(MumbleBot):
 			packets.SERVERSYNC: self.initState,
 			packets.PERMISSIONDENIED: self.permissionDenied,
 			packets.TEXTMESSAGE: self.parseMessage,
+			packets.UDPTUNNEL: self.udpTunnel,
 		}
 
 		for ptype in handlers.keys():
 			self.addHandler(ptype, handlers[ptype])
 
+		self.opus_decoder = OpusDecoder(constants.SAMPLE_RATE, 2)
+		self.opus_encoder = OpusEncoder(constants.SAMPLE_RATE, 1, "voip")
+		self.opus_encoder.vbr = False
+		with wave.open("clap.wav", "rb") as f:
+			self.clap_pcm = f.readframes(f.getnframes())
+		print(len(self.clap_pcm))
+		self.clap_pcm = self.opus_encoder.encode_float(self.clap_pcm, constants.FRAME_SIZE)
+		print(len(self.clap_pcm))
+
+		self.audio_output = p.open(format=pyaudio.paFloat32, channels=2, rate=constants.SAMPLE_RATE, output=True)
+
 		self._registerCommands()
 		self.setupGroups(config)
+
+	def udpTunnel(self, data):
+		total_length = len(data)
+		data = BytesIO(data)
+		header = data.read(1)
+		type = UDPMessageType.decode(header[0])
+		target = header[0] & 0b00011111
+		if type == UDPMessageType.Ping:
+			# print("Encountered ping, done.")
+			return
+		session = varint2.decode_stream(data)
+		if type == UDPMessageType.VoiceOpus:
+			sequence = varint2.decode_stream(data)
+		else:
+			sequence = varint.decode_stream(data)
+		# print(type, target, session, sequence)
+		# print("Read {} bytes from header.".format(data.tell()))
+		frame = 0
+		while True:
+			header = data.read(1)
+			if len(header) != 1:
+				# print("Couldn't read audio header.")
+				break
+
+			terminator = ((header[0] >> 7) & 0b00000001) == 1
+			length = (header[0]) & 0b01111111
+			frame += 1
+
+			# print("Audio frame {} length: {}".format(frame, length))
+
+			self.audio_output.write(self.opus_decoder.decode_float(data.read(length), constants.FRAME_SIZE))
+			if terminator or data.tell() == total_length:
+				# print("Terminated.")
+				break
+		# if data.tell() != total_length:
+			# print("Trailing data?")
+		# print()
 
 	def _registerCommands(self):
 		for f in dir(self):
@@ -184,14 +242,14 @@ class Hambone(MumbleBot):
 		self.logger.warning("Permission denied: %s (%s)" % (permission_packet.reason, protobuf.PermissionDenied.DenyType.Name(permission_packet.type)))
 
 	def initState(self, data):
-		self.toggleDeafened()
+		# self.toggleDeafened()
 
 		if self.user['comment'] == "":
 			self.setComment("I am merely a bot.")
 
 	def firstHeartbeat(self, data):
 		if config.udp:
-			host = self.transport.getHost()
+			host = self.transport.getPeer()
 			reactor.listenUDP(host.port, MumbleUDP(host.host, self.key, self.client_nonce, self.server_nonce))
 
 	def sendToProper(self, msg_packet, msg):
@@ -264,6 +322,10 @@ class Hambone(MumbleBot):
 			self.logger.error("Invalid command syntax try: %s" % e)
 		except:
 			self.logger.error("Failed to run command '%s' with:\n%s" % (msg_packet.message, traceback.format_exc()))
+
+	@register
+	def clap(self, msg_packet, command):
+		pass
 
 	@register
 	def greet(self, msg_packet, command):

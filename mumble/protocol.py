@@ -3,11 +3,23 @@ import time
 import traceback
 import random
 import logging
+import binascii
+
+from enum import Enum
 
 from .lib import varint
+from .lib.ocb.aes import AES
+from .lib.ocb import OCB
 
-from Crypto.Cipher import AES
 from twisted.internet.protocol import Protocol, ConnectedDatagramProtocol
+
+
+def encodeVersion(major, minor, patch):
+	return (major << 16) | (minor << 8) | (patch & 0xFF)
+
+
+def decodeVersion(version):
+	return (version & ~0x0000FFFF) >> 16, (version & ~0xFFFF00FF) >> 8, (version & ~0xFFFFFF00)
 
 
 class MumbleResponseError(Exception):
@@ -103,29 +115,55 @@ class ConnectedOCBDatagramProtocol(ConnectedDatagramProtocol):
 		print(client_nonce, len(client_nonce))
 		print(server_nonce, len(server_nonce))
 		self.ip = ip
-		self.key = bytes(key)
-		self.client_nonce = bytes(client_nonce)
-		self.server_nonce = bytes(server_nonce)
+		self.key = bytearray(key)
+		self.client_nonce = bytearray(client_nonce)
+		self.server_nonce = bytearray(server_nonce)
 
-		self.ocb = AES.new(self.key, AES.MODE_OCB, nonce=self.client_nonce)
+		def hexlify(bytearray):
+			return ''.join(["%02x" % x for x in bytearray])
+
+		print("OCB-AES128 Key: %s, Client Nonce: %s, Server Nonce: %s" % (hexlify(self.key), hexlify(self.client_nonce), hexlify(self.server_nonce)))
+
+		self.ocb = OCB(AES(128))
+		self.ocb.setKey(self.key)
+		self.ocb.setNonce(self.server_nonce)
 
 	def write(self, data):
-		# self.ocb.setNonce(self.client_nonce)
-		# (auth, plaintext) = self.ocb.decrypt(header, cipher, tag)
-		# print("Decrypted packet (%s): %s" % (auth, str(plaintext).encode("hex")))
-		# header = struct.pack('!BBBB', random.randint(0, 255), random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-		print("Writing: %s (%s)" % (data, len(data)))
-		(ciphertext, mac) = self.ocb.encrypt_and_digest(data)
-		self.transport.write(ciphertext)
+		"""
+		4 byte header is:
+		First byte of client nonce followed by first three bytes of tag
+		"""
+		(tag, ciphertext) = self.ocb.encrypt(bytearray(data), bytearray())
+		data = self.server_nonce[0:1] + tag[0:3] + ciphertext
+		print("Ciphertext len: {}, Headered data len: {}".format(len(ciphertext), len(data)))
+		self.transport.write(data)
+
+	def datagramReceived(self, data, addr):
+		self.ocb.decrypt()
 
 
-def hexlify(bytearray):
-	return ''.join(["%02x" % x for x in bytearray])
+class UDPMessageType(Enum):
+	VoiceCELTAlpha = 0
+	Ping = 1
+	VoiceSpeex = 2
+	VoiceCELTBeta = 3
+	VoiceOpus = 4
+
+	def encode(self):
+		return self.value << 5
+
+	@classmethod
+	def decode(self, data):
+		return self((data >> 5) & 0x7)
 
 
 class MumbleUDP(ConnectedOCBDatagramProtocol):
-	ping_header = bytes(0b00100000)
-	empty = bytearray()
+	"""
+	There are two types of packets that get sent over UDP with mumble, encrypted
+	"typed" packets and a unencrypted ping type that is separate from the "typed" ping.
+
+	Encrypted packets have a 4 byte crypt header and a 1 byte header for mumble.
+	"""
 	format = logging.Formatter("%(asctime)-15s %(name)-3s | %(levelname)-6s: %(message)s")
 
 	def __init__(self, *args, **kwargs):
@@ -142,8 +180,6 @@ class MumbleUDP(ConnectedOCBDatagramProtocol):
 			console = logging.StreamHandler()
 			console.setFormatter(self.format)
 			self.logger.addHandler(console)
-
-		self.logger.debug("OCB-AES128 Key: %s, Client Nonce: %s, Server Nonce: %s" % (hexlify(self.key), hexlify(self.client_nonce), hexlify(self.server_nonce)))
 
 	def setVarint(self, obj):
 		print(obj)
@@ -167,7 +203,15 @@ class MumbleUDP(ConnectedOCBDatagramProtocol):
 		return r
 
 	def sendPing(self):
-		self.write(self.ping_header + varint.encode(int(time.time())))
+		"""
+		Example ping is 0cdb00650d6c3d9e
+		"""
+		self.write(struct.pack("!B", UDPMessageType.Ping.encode()) + b"\x00" * 3)
+
+	def sendStatPing(self):
+		data = binascii.unhexlify("0000000031319001b1050000")
+		self.logger.debug("Sending ping \"{}\":{}...".format(data, len(data)))
+		self.transport.write(data)
 
 	def startProtocol(self):
 		self.transport.connect(self.ip, 64738)
@@ -178,6 +222,6 @@ class MumbleUDP(ConnectedOCBDatagramProtocol):
 		self.logger.debug("refused")
 
 	def datagramReceived(self, data, addr):
-		packet = bytearray()
-		self.appendStringToBytearray(data, packet)
-		self.logger.debug("Received packet with contents: %s (%s)" % (self.bytearrayToBinaryString(packet), data.encode('hex')))
+		self.logger.debug("Received packet with contents: {}".format(data))
+		(major, minor, patch, timestamp, users, max_users, bandwidth) = struct.unpack("!HBB8sIII", data)
+		print(major, minor, patch, varint.decode_bytes(timestamp), users, max_users, bandwidth)
