@@ -1,0 +1,57 @@
+host = ('localhost', 64738)
+key = ('keys\client.crt', 'keys\client.key')
+name = "Hambone"
+
+groups = {
+	"superadmin": {
+		"superuser": True
+	},
+	"admin": {
+		"parent": "moderator",
+		"commands": [
+			"dance"
+		]
+	},
+	"moderator": {
+		"parent": "user",
+		"commands": [
+			"come",
+			"follow"
+		]
+	},
+	"user": {
+		"default": True,
+		"commands": [
+			"help",
+			"isaway",
+			"roll",
+			"pick",
+			"echo",
+			"away",
+			"quote",
+			"greet",
+			"steam",
+			"define"
+		]
+	}
+}
+
+users = {
+	# "username": "role",
+	"username": "superadmin"
+}
+
+quotes = [
+	"'Put some quotes here' -Some Guy"
+]
+
+definitions = {
+	"word": "Definition"
+}
+
+greeting = [
+	"Hey, this is hambone!"
+]
+
+udp = False
+audio = False
